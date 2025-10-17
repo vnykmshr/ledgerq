@@ -192,6 +192,56 @@ func (q *Queue) Enqueue(payload []byte) (uint64, error) {
 	return offset, nil
 }
 
+// EnqueueBatch appends multiple messages to the queue in a single operation.
+// This is more efficient than calling Enqueue() multiple times as it performs
+// a single fsync for all messages.
+// Returns the offsets where the messages were written.
+func (q *Queue) EnqueueBatch(payloads [][]byte) ([]uint64, error) {
+	if len(payloads) == 0 {
+		return nil, fmt.Errorf("empty batch")
+	}
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.closed {
+		return nil, fmt.Errorf("queue is closed")
+	}
+
+	offsets := make([]uint64, len(payloads))
+	timestamp := time.Now().UnixNano()
+
+	// Write all entries
+	for i, payload := range payloads {
+		entry := &format.Entry{
+			Type:      format.EntryTypeData,
+			Flags:     format.EntryFlagNone,
+			MsgID:     q.nextMsgID,
+			Timestamp: timestamp,
+			Payload:   payload,
+		}
+
+		offset, err := q.segments.Write(entry)
+		if err != nil {
+			// On error, sync what we've written so far
+			_ = q.segments.Sync()
+			return offsets[:i], fmt.Errorf("failed to write entry %d: %w", i, err)
+		}
+
+		offsets[i] = offset
+		q.nextMsgID++
+	}
+
+	// Single sync for the entire batch
+	if q.opts.AutoSync {
+		if err := q.segments.Sync(); err != nil {
+			return offsets, fmt.Errorf("failed to sync batch: %w", err)
+		}
+	}
+
+	return offsets, nil
+}
+
 // Message represents a dequeued message.
 type Message struct {
 	// ID is the unique message identifier
@@ -265,6 +315,91 @@ func (q *Queue) Dequeue() (*Message, error) {
 	}
 
 	return nil, fmt.Errorf("message ID %d not found", q.readMsgID)
+}
+
+// DequeueBatch retrieves up to maxMessages from the queue in a single operation.
+// Returns fewer messages if the queue has fewer than maxMessages available.
+// Returns an error if no messages are available.
+func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
+	if maxMessages <= 0 {
+		return nil, fmt.Errorf("maxMessages must be > 0")
+	}
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.closed {
+		return nil, fmt.Errorf("queue is closed")
+	}
+
+	// Check if there are any messages to read
+	if q.readMsgID >= q.nextMsgID {
+		return nil, fmt.Errorf("no messages available")
+	}
+
+	// Ensure data is flushed to disk before reading
+	if err := q.segments.Sync(); err != nil {
+		return nil, fmt.Errorf("failed to sync before dequeue: %w", err)
+	}
+
+	// Determine how many messages we can actually read
+	available := q.nextMsgID - q.readMsgID
+	count := uint64(maxMessages)
+	if available < count {
+		count = available
+	}
+
+	messages := make([]*Message, 0, count)
+
+	// Get all segments
+	allSegments := q.segments.GetSegments()
+	activeSeg := q.segments.GetActiveSegment()
+	if activeSeg != nil {
+		allSegments = append(allSegments, activeSeg)
+	}
+
+	// Read messages
+	for i := uint64(0); i < count; i++ {
+		targetMsgID := q.readMsgID + i
+
+		// Search for the message in segments
+		found := false
+		for _, seg := range allSegments {
+			reader, err := q.segments.OpenReader(seg.BaseOffset)
+			if err != nil {
+				continue
+			}
+
+			entry, offset, _, err := reader.FindByMessageID(targetMsgID)
+			_ = reader.Close()
+
+			if err == nil {
+				msg := &Message{
+					ID:        entry.MsgID,
+					Offset:    offset,
+					Payload:   entry.Payload,
+					Timestamp: entry.Timestamp,
+				}
+				messages = append(messages, msg)
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			// If we can't find a message, stop here
+			break
+		}
+	}
+
+	// Advance read position by the number of messages we actually read
+	q.readMsgID += uint64(len(messages))
+
+	if len(messages) == 0 {
+		return nil, fmt.Errorf("no messages could be read")
+	}
+
+	return messages, nil
 }
 
 // Sync forces a sync of pending writes to disk.
