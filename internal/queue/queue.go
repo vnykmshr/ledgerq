@@ -402,6 +402,32 @@ func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 	return messages, nil
 }
 
+// SeekToMessageID sets the read position to a specific message ID.
+// Subsequent Dequeue() calls will start reading from this message.
+// Returns an error if the message ID is invalid or out of range.
+func (q *Queue) SeekToMessageID(msgID uint64) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.closed {
+		return fmt.Errorf("queue is closed")
+	}
+
+	// Validate message ID range
+	if msgID == 0 {
+		return fmt.Errorf("message ID must be > 0")
+	}
+
+	if msgID >= q.nextMsgID {
+		return fmt.Errorf("message ID %d not yet written (next ID: %d)", msgID, q.nextMsgID)
+	}
+
+	// Set read position
+	q.readMsgID = msgID
+
+	return nil
+}
+
 // Sync forces a sync of pending writes to disk.
 func (q *Queue) Sync() error {
 	q.mu.RLock()
