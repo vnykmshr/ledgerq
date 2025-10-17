@@ -34,20 +34,20 @@ func NewReader(path string) (*Reader, error) {
 	// Get file size
 	info, err := file.Stat()
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to stat segment file: %w", err)
 	}
 
 	// Read segment header
 	header, err := format.ReadSegmentHeader(path)
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to read segment header: %w", err)
 	}
 
 	// Validate header
 	if err := header.Validate(); err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("invalid segment header: %w", err)
 	}
 

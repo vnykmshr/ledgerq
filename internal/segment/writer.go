@@ -105,8 +105,8 @@ func NewWriter(dir string, baseOffset uint64, opts *WriterOptions) (*Writer, err
 
 	headerData := header.Marshal()
 	if _, err := writer.Write(headerData); err != nil {
-		file.Close()
-		os.Remove(path)
+		_ = file.Close()
+		_ = os.Remove(path)
 		return nil, fmt.Errorf("failed to write segment header: %w", err)
 	}
 
