@@ -380,3 +380,191 @@ func BenchmarkReplayAndRead(b *testing.B) {
 		}
 	}
 }
+
+// Concurrent benchmarks
+
+func BenchmarkConcurrentEnqueue_2Writers(b *testing.B) {
+	benchmarkConcurrentEnqueue(b, 2)
+}
+
+func BenchmarkConcurrentEnqueue_4Writers(b *testing.B) {
+	benchmarkConcurrentEnqueue(b, 4)
+}
+
+func BenchmarkConcurrentEnqueue_8Writers(b *testing.B) {
+	benchmarkConcurrentEnqueue(b, 8)
+}
+
+func benchmarkConcurrentEnqueue(b *testing.B, numWriters int) {
+	tmpDir := b.TempDir()
+
+	opts := DefaultOptions(tmpDir)
+	opts.AutoSync = false
+
+	q, err := Open(tmpDir, opts)
+	if err != nil {
+		b.Fatalf("Open() error = %v", err)
+	}
+	defer func() { _ = q.Close() }()
+
+	payload := []byte("benchmark message payload")
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if _, err := q.Enqueue(payload); err != nil {
+				b.Fatalf("Enqueue() error = %v", err)
+			}
+		}
+	})
+	b.StopTimer()
+
+	_ = q.Sync()
+}
+
+func BenchmarkConcurrentDequeue_2Readers(b *testing.B) {
+	benchmarkConcurrentDequeue(b, 2)
+}
+
+func BenchmarkConcurrentDequeue_4Readers(b *testing.B) {
+	benchmarkConcurrentDequeue(b, 4)
+}
+
+func BenchmarkConcurrentDequeue_8Readers(b *testing.B) {
+	benchmarkConcurrentDequeue(b, 8)
+}
+
+func benchmarkConcurrentDequeue(b *testing.B, numReaders int) {
+	tmpDir := b.TempDir()
+
+	q, err := Open(tmpDir, nil)
+	if err != nil {
+		b.Fatalf("Open() error = %v", err)
+	}
+	defer func() { _ = q.Close() }()
+
+	// Pre-populate with enough messages for parallel readers
+	payload := []byte("benchmark message payload")
+	totalMessages := b.N * numReaders
+	for i := 0; i < totalMessages; i++ {
+		if _, err := q.Enqueue(payload); err != nil {
+			b.Fatalf("Enqueue() error = %v", err)
+		}
+	}
+	_ = q.Sync()
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if _, err := q.Dequeue(); err != nil {
+				// Expected: some readers will hit end of queue
+				return
+			}
+		}
+	})
+}
+
+func BenchmarkConcurrentMixed_2P2C(b *testing.B) {
+	benchmarkConcurrentMixed(b, 2, 2)
+}
+
+func BenchmarkConcurrentMixed_4P4C(b *testing.B) {
+	benchmarkConcurrentMixed(b, 4, 4)
+}
+
+func BenchmarkConcurrentMixed_8P8C(b *testing.B) {
+	benchmarkConcurrentMixed(b, 8, 8)
+}
+
+func benchmarkConcurrentMixed(b *testing.B, numProducers, numConsumers int) {
+	tmpDir := b.TempDir()
+
+	opts := DefaultOptions(tmpDir)
+	opts.AutoSync = false
+
+	q, err := Open(tmpDir, opts)
+	if err != nil {
+		b.Fatalf("Open() error = %v", err)
+	}
+	defer func() { _ = q.Close() }()
+
+	payload := []byte("benchmark message payload")
+
+	b.ResetTimer()
+
+	// Start producers
+	producerDone := make(chan struct{})
+	go func() {
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				_, _ = q.Enqueue(payload)
+			}
+		})
+		close(producerDone)
+	}()
+
+	// Start consumers
+	consumerDone := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-producerDone:
+				// Drain remaining messages
+				for {
+					if _, err := q.Dequeue(); err != nil {
+						close(consumerDone)
+						return
+					}
+				}
+			default:
+				_, _ = q.Dequeue()
+			}
+		}
+	}()
+
+	<-producerDone
+	<-consumerDone
+}
+
+func BenchmarkConcurrentBatchEnqueue_2Writers(b *testing.B) {
+	benchmarkConcurrentBatchEnqueue(b, 2, 10)
+}
+
+func BenchmarkConcurrentBatchEnqueue_4Writers(b *testing.B) {
+	benchmarkConcurrentBatchEnqueue(b, 4, 10)
+}
+
+func BenchmarkConcurrentBatchEnqueue_8Writers(b *testing.B) {
+	benchmarkConcurrentBatchEnqueue(b, 8, 10)
+}
+
+func benchmarkConcurrentBatchEnqueue(b *testing.B, numWriters, batchSize int) {
+	tmpDir := b.TempDir()
+
+	opts := DefaultOptions(tmpDir)
+	opts.AutoSync = false
+
+	q, err := Open(tmpDir, opts)
+	if err != nil {
+		b.Fatalf("Open() error = %v", err)
+	}
+	defer func() { _ = q.Close() }()
+
+	// Prepare batch
+	payloads := make([][]byte, batchSize)
+	for i := 0; i < batchSize; i++ {
+		payloads[i] = []byte("benchmark message payload")
+	}
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if _, err := q.EnqueueBatch(payloads); err != nil {
+				b.Fatalf("EnqueueBatch() error = %v", err)
+			}
+		}
+	})
+	b.StopTimer()
+
+	_ = q.Sync()
+}
