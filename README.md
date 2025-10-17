@@ -11,6 +11,7 @@ Go developers often need a simple, reliable queue for embedded or local-first ap
 - **Zero dependencies** beyond the Go standard library
 - **Crash-safe durability** with append-only log design
 - **Batch operations** for high throughput
+- **Streaming API** for real-time event processing
 - **Replay capability** from message ID or timestamp
 - **Auto-compaction** with retention policies
 - **Thread-safe** concurrent access
@@ -25,6 +26,7 @@ Go developers often need a simple, reliable queue for embedded or local-first ap
 - ✅ **Read Position Persistence** — Consumer offset tracked across restarts
 - ✅ **Automatic Segment Rotation** — Configurable by size, count, time, or both
 - ✅ **Batch Operations** — Efficient EnqueueBatch/DequeueBatch with single fsync
+- ✅ **Streaming API** — Real-time push-based message delivery with context support
 - ✅ **Replay Capabilities** — Seek by message ID or timestamp
 - ✅ **Compaction & Retention** — Automatic background or manual cleanup
 - ✅ **Thread-Safe** — Safe for concurrent producers and consumers
@@ -120,6 +122,39 @@ fmt.Printf("ID: %d, Payload: %s\n", msg.ID, msg.Payload)
 // Batch
 messages, err := q.DequeueBatch(10) // Read up to 10 messages
 ```
+
+#### Streaming Messages
+
+```go
+import "context"
+
+// Create a handler function
+handler := func(msg *ledgerq.Message) error {
+    fmt.Printf("Received: %s\n", msg.Payload)
+    return nil  // Return error to stop streaming
+}
+
+// Stream with context cancellation
+ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer cancel()
+
+err := q.Stream(ctx, handler)
+// Returns when context is cancelled or handler returns error
+```
+
+**Benefits of Streaming:**
+- Real-time push-based delivery instead of polling
+- Automatic error handling and retry logic
+- Built-in context support for graceful shutdown
+- Cleaner code compared to manual polling loops
+- Consistent polling interval (100ms) with minimal overhead
+
+**Use Cases:**
+- Event-driven architectures
+- Real-time log processing
+- Message relay and forwarding
+- Continuous data pipelines
+- Live monitoring dashboards
 
 ### Advanced Features
 
@@ -305,6 +340,7 @@ See the [examples](examples/) directory for complete, runnable examples:
 
 - **[simple](examples/simple)**: Basic queue operations
 - **[producer-consumer](examples/producer-consumer)**: Multi-producer, multi-consumer pattern
+- **[streaming](examples/streaming)**: Real-time streaming with context cancellation
 - **[replay](examples/replay)**: Replay and seeking capabilities
 - **[metrics](examples/metrics)**: Metrics collection and monitoring
 
@@ -312,6 +348,7 @@ Run any example:
 ```bash
 go run examples/simple/main.go
 go run examples/producer-consumer/main.go
+go run examples/streaming/main.go
 go run examples/replay/main.go
 go run examples/metrics/main.go
 ```

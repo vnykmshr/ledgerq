@@ -26,6 +26,7 @@
 package ledgerq
 
 import (
+	"context"
 	"time"
 
 	"github.com/vnykmshr/ledgerq/internal/logging"
@@ -336,6 +337,43 @@ func (q *Queue) Compact() (*CompactionResult, error) {
 		SegmentsRemoved: result.SegmentsRemoved,
 		BytesFreed:      result.BytesFreed,
 	}, nil
+}
+
+// StreamHandler is called for each message in the stream.
+// Return an error to stop streaming.
+type StreamHandler func(*Message) error
+
+// Stream continuously reads messages from the queue and calls the handler for each message.
+// Streaming continues until the context is cancelled, an error occurs, or no more messages are available.
+//
+// The Stream method polls for new messages with a configurable interval (100ms by default).
+// When a message is available, it's immediately passed to the handler.
+// If no messages are available, Stream waits briefly before checking again.
+//
+// Context cancellation will gracefully stop streaming and return context.Canceled.
+// Handler errors will stop streaming and return the handler error.
+//
+// Example usage:
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+//	defer cancel()
+//
+//	err := q.Stream(ctx, func(msg *Message) error {
+//	    fmt.Printf("Received: %s\n", msg.Payload)
+//	    return nil
+//	})
+func (q *Queue) Stream(ctx context.Context, handler StreamHandler) error {
+	// Convert public handler to internal handler
+	internalHandler := func(msg *queue.Message) error {
+		return handler(&Message{
+			ID:        msg.ID,
+			Offset:    msg.Offset,
+			Payload:   msg.Payload,
+			Timestamp: msg.Timestamp,
+		})
+	}
+
+	return q.q.Stream(ctx, internalHandler)
 }
 
 // Helper functions to convert between public and internal types
