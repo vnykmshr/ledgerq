@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/vnykmshr/ledgerq/internal/format"
+	"github.com/vnykmshr/ledgerq/internal/logging"
 	"github.com/vnykmshr/ledgerq/internal/segment"
 )
 
@@ -47,6 +48,9 @@ type Options struct {
 
 	// SyncInterval for periodic syncing (if AutoSync is false)
 	SyncInterval time.Duration
+
+	// Logger for structured logging (nil = no logging)
+	Logger logging.Logger
 }
 
 // DefaultOptions returns sensible defaults for queue configuration.
@@ -55,6 +59,7 @@ func DefaultOptions(dir string) *Options {
 		SegmentOptions: segment.DefaultManagerOptions(dir),
 		AutoSync:       false,
 		SyncInterval:   1 * time.Second,
+		Logger:         logging.NoopLogger{}, // No logging by default
 	}
 }
 
@@ -110,6 +115,14 @@ func Open(dir string, opts *Options) (*Queue, error) {
 		q.startSyncTimer()
 	}
 
+	// Log queue opened
+	opts.Logger.Info("queue opened",
+		logging.F("dir", dir),
+		logging.F("next_msg_id", nextMsgID),
+		logging.F("read_msg_id", readMsgID),
+		logging.F("segments", len(segments.GetSegments())),
+	)
+
 	return q, nil
 }
 
@@ -164,11 +177,13 @@ func (q *Queue) Enqueue(payload []byte) (uint64, error) {
 		return 0, fmt.Errorf("queue is closed")
 	}
 
+	msgID := q.nextMsgID
+
 	// Create entry
 	entry := &format.Entry{
 		Type:      format.EntryTypeData,
 		Flags:     format.EntryFlagNone,
-		MsgID:     q.nextMsgID,
+		MsgID:     msgID,
 		Timestamp: time.Now().UnixNano(),
 		Payload:   payload,
 	}
@@ -176,6 +191,10 @@ func (q *Queue) Enqueue(payload []byte) (uint64, error) {
 	// Write to segment
 	offset, err := q.segments.Write(entry)
 	if err != nil {
+		q.opts.Logger.Error("enqueue failed",
+			logging.F("msg_id", msgID),
+			logging.F("error", err.Error()),
+		)
 		return 0, fmt.Errorf("failed to write entry: %w", err)
 	}
 
@@ -188,6 +207,12 @@ func (q *Queue) Enqueue(payload []byte) (uint64, error) {
 			return offset, fmt.Errorf("failed to sync: %w", err)
 		}
 	}
+
+	q.opts.Logger.Debug("message enqueued",
+		logging.F("msg_id", msgID),
+		logging.F("offset", offset),
+		logging.F("payload_size", len(payload)),
+	)
 
 	return offset, nil
 }
@@ -238,6 +263,12 @@ func (q *Queue) EnqueueBatch(payloads [][]byte) ([]uint64, error) {
 			return offsets, fmt.Errorf("failed to sync batch: %w", err)
 		}
 	}
+
+	q.opts.Logger.Debug("batch enqueued",
+		logging.F("count", len(payloads)),
+		logging.F("first_msg_id", q.nextMsgID-uint64(len(payloads))),
+		logging.F("last_msg_id", q.nextMsgID-1),
+	)
 
 	return offsets, nil
 }
@@ -503,9 +534,17 @@ func (q *Queue) Close() error {
 	// Close segments
 	if q.segments != nil {
 		if err := q.segments.Close(); err != nil {
+			q.opts.Logger.Error("failed to close segments",
+				logging.F("error", err.Error()),
+			)
 			return err
 		}
 	}
+
+	q.opts.Logger.Info("queue closed",
+		logging.F("total_messages", q.nextMsgID-1),
+		logging.F("pending_messages", q.nextMsgID-q.readMsgID),
+	)
 
 	q.closed = true
 	return nil
