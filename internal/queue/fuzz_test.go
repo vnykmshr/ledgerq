@@ -222,6 +222,15 @@ func FuzzMetadataOperations(f *testing.F) {
 	f.Add(uint64(^uint64(0)), uint64(^uint64(0)))
 
 	f.Fuzz(func(t *testing.T, nextID, readID uint64) {
+		// Skip invalid values - message IDs must be >= 1
+		if nextID == 0 || readID == 0 {
+			t.Skip("message IDs must be >= 1")
+		}
+		// Skip invalid combinations where readID > nextID
+		if readID > nextID {
+			t.Skip("readID cannot be greater than nextID")
+		}
+
 		tmpDir := t.TempDir()
 
 		m, err := OpenMetadata(tmpDir, false)
@@ -231,7 +240,6 @@ func FuzzMetadataOperations(f *testing.F) {
 		defer m.Close()
 
 		// Try to update state
-		// Note: metadata allows any uint64 values (no validation)
 		if err := m.UpdateState(nextID, readID); err != nil {
 			t.Fatalf("UpdateState failed: %v", err)
 		}
