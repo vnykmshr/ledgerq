@@ -269,11 +269,14 @@ Concurrent (8 writers):
 - **Fast Startup**: Only scan last segment on recovery
 - **Better Caching**: OS can cache hot segments efficiently
 
-### No Read Position Persistence
+### Read Position Persistence
 
-Currently, read position is NOT persisted. After reopening, queues start from the beginning. This simplifies the implementation and works well for event logs, audit trails, and replayable workflows.
+Read position is automatically persisted to disk. After reopening, queues continue from where they left off. This enables true queue semantics where consumed messages remain consumed across restarts.
 
-**Future Work**: Read position persistence can be added via metadata files or explicit commit APIs.
+- **Automatic**: Position updates on every dequeue operation
+- **Crash-Safe**: Metadata synced according to AutoSync option
+- **Recovery**: Hybrid approach using both metadata and segment scanning
+- **Seekable**: Explicit seeking updates persisted position
 
 ### Sparse Indexing
 
@@ -312,7 +315,7 @@ LedgerQ is feature-complete and suitable for:
 **Not Recommended For**:
 - High-throughput distributed systems (use Kafka, NATS, etc.)
 - Multi-node scenarios (single-node only)
-- When read position persistence is critical
+- Consumer groups or multiple independent consumers
 
 ## Use Cases
 

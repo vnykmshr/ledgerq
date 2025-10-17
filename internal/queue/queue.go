@@ -72,6 +72,9 @@ type Queue struct {
 	// Segment manager for storage
 	segments *segment.Manager
 
+	// Metadata for persistent state
+	metadata *Metadata
+
 	// Message ID tracking
 	nextMsgID uint64 // Next message ID to assign
 	readMsgID uint64 // Next message ID to read
@@ -90,22 +93,46 @@ func Open(dir string, opts *Options) (*Queue, error) {
 		opts = DefaultOptions(dir)
 	}
 
+	// Open or create metadata file
+	metadata, err := OpenMetadata(dir, opts.AutoSync)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open metadata: %w", err)
+	}
+
+	// Get state from metadata
+	nextMsgID, readMsgID := metadata.GetState()
+
 	// Create segment manager
 	segments, err := segment.NewManager(opts.SegmentOptions)
 	if err != nil {
+		_ = metadata.Close()
 		return nil, fmt.Errorf("failed to create segment manager: %w", err)
 	}
 
-	// Determine next message ID by scanning existing segments
-	nextMsgID, readMsgID, err := recoverState(segments)
+	// Recover state from segments if needed (for nextMsgID)
+	recoveredNextMsgID, _, err := recoverState(segments)
 	if err != nil {
 		_ = segments.Close()
+		_ = metadata.Close()
 		return nil, fmt.Errorf("failed to recover queue state: %w", err)
+	}
+
+	// Use the higher of metadata nextMsgID and recovered nextMsgID
+	// (in case segments were written but metadata wasn't synced)
+	if recoveredNextMsgID > nextMsgID {
+		nextMsgID = recoveredNextMsgID
+		// Update metadata with recovered state
+		if err := metadata.SetNextMsgID(nextMsgID); err != nil {
+			_ = segments.Close()
+			_ = metadata.Close()
+			return nil, fmt.Errorf("failed to update metadata: %w", err)
+		}
 	}
 
 	q := &Queue{
 		opts:      opts,
 		segments:  segments,
+		metadata:  metadata,
 		nextMsgID: nextMsgID,
 		readMsgID: readMsgID,
 	}
@@ -201,6 +228,11 @@ func (q *Queue) Enqueue(payload []byte) (uint64, error) {
 	// Increment message ID
 	q.nextMsgID++
 
+	// Update metadata
+	if err := q.metadata.SetNextMsgID(q.nextMsgID); err != nil {
+		return offset, fmt.Errorf("failed to update metadata: %w", err)
+	}
+
 	// Sync if auto-sync is enabled
 	if q.opts.AutoSync {
 		if err := q.segments.Sync(); err != nil {
@@ -255,6 +287,11 @@ func (q *Queue) EnqueueBatch(payloads [][]byte) ([]uint64, error) {
 
 		offsets[i] = offset
 		q.nextMsgID++
+	}
+
+	// Update metadata with final nextMsgID
+	if err := q.metadata.SetNextMsgID(q.nextMsgID); err != nil {
+		return offsets, fmt.Errorf("failed to update metadata: %w", err)
 	}
 
 	// Single sync for the entire batch
@@ -341,6 +378,11 @@ func (q *Queue) Dequeue() (*Message, error) {
 			// Advance read position
 			q.readMsgID++
 
+			// Update metadata
+			if err := q.metadata.SetReadMsgID(q.readMsgID); err != nil {
+				return msg, fmt.Errorf("failed to update metadata: %w", err)
+			}
+
 			return msg, nil
 		}
 	}
@@ -426,6 +468,11 @@ func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 	// Advance read position by the number of messages we actually read
 	q.readMsgID += uint64(len(messages))
 
+	// Update metadata
+	if err := q.metadata.SetReadMsgID(q.readMsgID); err != nil {
+		return messages, fmt.Errorf("failed to update metadata: %w", err)
+	}
+
 	if len(messages) == 0 {
 		return nil, fmt.Errorf("no messages could be read")
 	}
@@ -455,6 +502,11 @@ func (q *Queue) SeekToMessageID(msgID uint64) error {
 
 	// Set read position
 	q.readMsgID = msgID
+
+	// Update metadata
+	if err := q.metadata.SetReadMsgID(q.readMsgID); err != nil {
+		return fmt.Errorf("failed to update metadata: %w", err)
+	}
 
 	return nil
 }
@@ -496,6 +548,12 @@ func (q *Queue) SeekToTimestamp(timestamp int64) error {
 		if err == nil {
 			// Found a message! Set read position to this message ID
 			q.readMsgID = entry.MsgID
+
+			// Update metadata
+			if err := q.metadata.SetReadMsgID(q.readMsgID); err != nil {
+				return fmt.Errorf("failed to update metadata: %w", err)
+			}
+
 			return nil
 		}
 	}
@@ -529,6 +587,16 @@ func (q *Queue) Close() error {
 	if q.syncTimerActive {
 		q.syncTimer.Stop()
 		q.syncTimerActive = false
+	}
+
+	// Close metadata first
+	if q.metadata != nil {
+		if err := q.metadata.Close(); err != nil {
+			q.opts.Logger.Error("failed to close metadata",
+				logging.F("error", err.Error()),
+			)
+			return err
+		}
 	}
 
 	// Close segments

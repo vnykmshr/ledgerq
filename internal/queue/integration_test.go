@@ -76,9 +76,14 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 		t.Errorf("After reopen: TotalMessages = %d, want %d", stats.TotalMessages, messageCount)
 	}
 
-	// NOTE: Read position is NOT persisted - queue always starts from beginning
-	// This is a known limitation. Dequeue remaining messages from start.
-	for i := 0; i < messageCount; i++ {
+	// Read position IS persisted - should continue from where we left off (message 50)
+	// We consumed half (50 messages), so 50 should remain
+	if stats.PendingMessages != uint64(messageCount/2) {
+		t.Errorf("PendingMessages after reopen = %d, want %d", stats.PendingMessages, messageCount/2)
+	}
+
+	// Dequeue remaining messages (messages 50-99)
+	for i := messageCount / 2; i < messageCount; i++ {
 		msg, err := q2.Dequeue()
 		if err != nil {
 			t.Fatalf("Dequeue(%d) after reopen error = %v", i, err)
@@ -89,7 +94,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 		}
 	}
 
-	// Should be empty
+	// Should be empty now
 	stats = q2.Stats()
 	if stats.PendingMessages != 0 {
 		t.Errorf("PendingMessages after draining = %d, want 0", stats.PendingMessages)
@@ -380,14 +385,20 @@ func TestIntegration_CrashRecovery(t *testing.T) {
 		t.Errorf("TotalMessages after recovery: got %d, want %d", stats2.TotalMessages, stats1.TotalMessages)
 	}
 
-	// NOTE: Read position is NOT persisted - queue always starts from beginning
-	// So we read all messages again, not just remaining ones
-	for i := 0; i < messageCount; i++ {
+	// Read position IS persisted - we consumed 20, so should have 30 remaining
+	expectedRemaining := messageCount - 20
+	if stats2.PendingMessages != uint64(expectedRemaining) {
+		t.Errorf("PendingMessages after recovery: got %d, want %d", stats2.PendingMessages, expectedRemaining)
+	}
+
+	// Read remaining messages (21-50)
+	for i := 0; i < expectedRemaining; i++ {
 		msg, err := q2.Dequeue()
 		if err != nil {
 			t.Fatalf("Dequeue(%d) after recovery error = %v", i, err)
 		}
-		expectedID := uint64(i + 1) // Starting from beginning
+		// We consumed 20 in first session, so next message should be ID 21
+		expectedID := uint64(21 + i)
 		if msg.ID != expectedID {
 			t.Errorf("Message %d: ID = %d, want %d", i, msg.ID, expectedID)
 		}
