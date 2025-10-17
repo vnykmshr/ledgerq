@@ -49,6 +49,9 @@ type Options struct {
 	// SyncInterval for periodic syncing (if AutoSync is false)
 	SyncInterval time.Duration
 
+	// CompactionInterval for automatic background compaction (0 = disabled)
+	CompactionInterval time.Duration
+
 	// Logger for structured logging (nil = no logging)
 	Logger logging.Logger
 }
@@ -56,10 +59,11 @@ type Options struct {
 // DefaultOptions returns sensible defaults for queue configuration.
 func DefaultOptions(dir string) *Options {
 	return &Options{
-		SegmentOptions: segment.DefaultManagerOptions(dir),
-		AutoSync:       false,
-		SyncInterval:   1 * time.Second,
-		Logger:         logging.NoopLogger{}, // No logging by default
+		SegmentOptions:     segment.DefaultManagerOptions(dir),
+		AutoSync:           false,
+		SyncInterval:       1 * time.Second,
+		CompactionInterval: 0, // Disabled by default
+		Logger:             logging.NoopLogger{}, // No logging by default
 	}
 }
 
@@ -82,6 +86,10 @@ type Queue struct {
 	// Periodic sync
 	syncTimer       *time.Timer
 	syncTimerActive bool
+
+	// Periodic compaction
+	compactionTimer       *time.Timer
+	compactionTimerActive bool
 
 	closed bool
 }
@@ -140,6 +148,11 @@ func Open(dir string, opts *Options) (*Queue, error) {
 	// Start periodic sync timer if configured
 	if !opts.AutoSync && opts.SyncInterval > 0 {
 		q.startSyncTimer()
+	}
+
+	// Start periodic compaction timer if configured
+	if opts.CompactionInterval > 0 {
+		q.startCompactionTimer()
 	}
 
 	// Log queue opened
@@ -589,6 +602,12 @@ func (q *Queue) Close() error {
 		q.syncTimerActive = false
 	}
 
+	// Stop compaction timer
+	if q.compactionTimerActive {
+		q.compactionTimer.Stop()
+		q.compactionTimerActive = false
+	}
+
 	// Close metadata first
 	if q.metadata != nil {
 		if err := q.metadata.Close(); err != nil {
@@ -645,6 +664,39 @@ func (q *Queue) startSyncTimer() {
 		}
 	})
 	q.syncTimerActive = true
+}
+
+// startCompactionTimer starts the periodic compaction timer.
+func (q *Queue) startCompactionTimer() {
+	q.compactionTimer = time.AfterFunc(q.opts.CompactionInterval, func() {
+		q.mu.RLock()
+		if !q.closed {
+			// Run compaction in background
+			result, err := q.segments.Compact()
+			if err != nil {
+				q.opts.Logger.Error("background compaction failed",
+					logging.F("error", err.Error()),
+				)
+			} else if result.SegmentsRemoved > 0 {
+				q.opts.Logger.Info("background compaction completed",
+					logging.F("segments_removed", result.SegmentsRemoved),
+					logging.F("bytes_freed", result.BytesFreed),
+				)
+			}
+		}
+		closed := q.closed
+		q.mu.RUnlock()
+
+		// Reschedule if not closed
+		if !closed {
+			q.mu.Lock()
+			if !q.closed {
+				q.compactionTimer.Reset(q.opts.CompactionInterval)
+			}
+			q.mu.Unlock()
+		}
+	})
+	q.compactionTimerActive = true
 }
 
 // Stats returns queue statistics.

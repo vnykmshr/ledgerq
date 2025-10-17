@@ -20,10 +20,11 @@ Go developers often need a simple, reliable queue for embedded or local-first ap
 
 - ✅ **Persistent Storage** — All messages durably written to disk
 - ✅ **FIFO Ordering** — Strict first-in-first-out guarantees
+- ✅ **Read Position Persistence** — Consumer offset tracked across restarts
 - ✅ **Automatic Segment Rotation** — Configurable by size, count, time, or both
 - ✅ **Batch Operations** — Efficient EnqueueBatch/DequeueBatch with single fsync
 - ✅ **Replay Capabilities** — Seek by message ID or timestamp
-- ✅ **Compaction & Retention** — Automatic cleanup of old segments
+- ✅ **Compaction & Retention** — Automatic background or manual cleanup
 - ✅ **Thread-Safe** — Safe for concurrent producers and consumers
 - ✅ **Sparse Indexing** — Fast lookups with minimal overhead
 - ✅ **Pluggable Logging** — Optional structured logging
@@ -165,9 +166,12 @@ opts.SegmentOptions.RetentionPolicy = &segment.RetentionPolicy{
     MinSegments: 1,    // Always keep at least 1
 }
 
+// Enable automatic background compaction (optional)
+opts.CompactionInterval = 5 * time.Minute // Run every 5 minutes
+
 q, _ := queue.Open("/path/to/queue", opts)
 
-// Manually trigger compaction
+// Or manually trigger compaction anytime
 result, err := q.segments.Compact()
 fmt.Printf("Removed %d segments, freed %d bytes\n",
     result.SegmentsRemoved, result.BytesFreed)
