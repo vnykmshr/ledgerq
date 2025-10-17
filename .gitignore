@@ -39,3 +39,6 @@ go.work
 # Queue data directories (for testing)
 /testdata/queues/
 *.queue/
+
+# Development todos (workflow management)
+/todos/
