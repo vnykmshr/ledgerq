@@ -428,6 +428,50 @@ func (q *Queue) SeekToMessageID(msgID uint64) error {
 	return nil
 }
 
+// SeekToTimestamp sets the read position to the first message at or after the given timestamp.
+// Uses the segment index for efficient lookup.
+// Returns an error if no messages exist at or after the timestamp.
+func (q *Queue) SeekToTimestamp(timestamp int64) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.closed {
+		return fmt.Errorf("queue is closed")
+	}
+
+	// Ensure data is synced before seeking
+	if err := q.segments.Sync(); err != nil {
+		return fmt.Errorf("failed to sync before seek: %w", err)
+	}
+
+	// Get all segments
+	allSegments := q.segments.GetSegments()
+	activeSeg := q.segments.GetActiveSegment()
+	if activeSeg != nil {
+		allSegments = append(allSegments, activeSeg)
+	}
+
+	// Search through segments for the first message at or after timestamp
+	for _, seg := range allSegments {
+		reader, err := q.segments.OpenReader(seg.BaseOffset)
+		if err != nil {
+			continue
+		}
+
+		// Try to find entry by timestamp using index
+		entry, _, _, err := reader.FindByTimestamp(timestamp)
+		_ = reader.Close()
+
+		if err == nil {
+			// Found a message! Set read position to this message ID
+			q.readMsgID = entry.MsgID
+			return nil
+		}
+	}
+
+	return fmt.Errorf("no messages found at or after timestamp %d", timestamp)
+}
+
 // Sync forces a sync of pending writes to disk.
 func (q *Queue) Sync() error {
 	q.mu.RLock()

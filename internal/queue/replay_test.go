@@ -3,6 +3,7 @@ package queue
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 func TestSeekToMessageID(t *testing.T) {
@@ -282,5 +283,166 @@ func TestSeekToMessageID_MultipleSeeks(t *testing.T) {
 	}
 	if msg.ID != 8 {
 		t.Errorf("Third dequeue ID = %d, want 8", msg.ID)
+	}
+}
+
+func TestSeekToTimestamp(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	q, err := Open(tmpDir, nil)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer func() { _ = q.Close() }()
+
+	// Enqueue messages with different timestamps
+	timestamps := make([]int64, 5)
+	for i := 0; i < 5; i++ {
+		timestamps[i] = time.Now().UnixNano()
+		if _, err := q.Enqueue([]byte(fmt.Sprintf("msg%d", i+1))); err != nil {
+			t.Fatalf("Enqueue() error = %v", err)
+		}
+		time.Sleep(10 * time.Millisecond) // Ensure different timestamps
+	}
+
+	// Seek to timestamp of message 3 (index 2)
+	if err := q.SeekToTimestamp(timestamps[2]); err != nil {
+		t.Fatalf("SeekToTimestamp() error = %v", err)
+	}
+
+	// Should read message 3
+	msg, err := q.Dequeue()
+	if err != nil {
+		t.Fatalf("Dequeue() error = %v", err)
+	}
+
+	if msg.ID != 3 {
+		t.Errorf("Dequeue() after SeekToTimestamp returned ID %d, want 3", msg.ID)
+	}
+}
+
+func TestSeekToTimestamp_BeforeAll(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	q, err := Open(tmpDir, nil)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer func() { _ = q.Close() }()
+
+	// Record time before enqueuing
+	beforeTime := time.Now().UnixNano()
+	time.Sleep(10 * time.Millisecond)
+
+	// Enqueue messages
+	for i := 0; i < 5; i++ {
+		if _, err := q.Enqueue([]byte(fmt.Sprintf("msg%d", i+1))); err != nil {
+			t.Fatalf("Enqueue() error = %v", err)
+		}
+	}
+
+	// Seek to before all messages
+	if err := q.SeekToTimestamp(beforeTime); err != nil {
+		t.Fatalf("SeekToTimestamp(beforeTime) error = %v", err)
+	}
+
+	// Should read first message
+	msg, err := q.Dequeue()
+	if err != nil {
+		t.Fatalf("Dequeue() error = %v", err)
+	}
+
+	if msg.ID != 1 {
+		t.Errorf("Dequeue() after SeekToTimestamp(beforeTime) returned ID %d, want 1", msg.ID)
+	}
+}
+
+func TestSeekToTimestamp_AfterAll(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	q, err := Open(tmpDir, nil)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer func() { _ = q.Close() }()
+
+	// Enqueue messages
+	for i := 0; i < 5; i++ {
+		if _, err := q.Enqueue([]byte(fmt.Sprintf("msg%d", i+1))); err != nil {
+			t.Fatalf("Enqueue() error = %v", err)
+		}
+	}
+
+	// Wait and get time after all messages
+	time.Sleep(10 * time.Millisecond)
+	afterTime := time.Now().UnixNano()
+
+	// Seek to after all messages
+	err = q.SeekToTimestamp(afterTime)
+	if err == nil {
+		t.Error("SeekToTimestamp(afterTime) should fail when no messages after timestamp")
+	}
+}
+
+func TestSeekToTimestamp_AfterClose(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	q, err := Open(tmpDir, nil)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+
+	if _, err := q.Enqueue([]byte("test")); err != nil {
+		t.Fatalf("Enqueue() error = %v", err)
+	}
+
+	if err := q.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	// Try to seek after close
+	err = q.SeekToTimestamp(time.Now().UnixNano())
+	if err == nil {
+		t.Error("SeekToTimestamp() after Close() should fail")
+	}
+}
+
+func TestSeekToTimestamp_WithBatch(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	q, err := Open(tmpDir, nil)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer func() { _ = q.Close() }()
+
+	// Enqueue messages with timestamps
+	timestamps := make([]int64, 10)
+	for i := 0; i < 10; i++ {
+		timestamps[i] = time.Now().UnixNano()
+		if _, err := q.Enqueue([]byte(fmt.Sprintf("msg%d", i+1))); err != nil {
+			t.Fatalf("Enqueue() error = %v", err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Seek to timestamp around message 5
+	if err := q.SeekToTimestamp(timestamps[4]); err != nil {
+		t.Fatalf("SeekToTimestamp() error = %v", err)
+	}
+
+	// Dequeue batch should start from around message 5
+	messages, err := q.DequeueBatch(3)
+	if err != nil {
+		t.Fatalf("DequeueBatch() error = %v", err)
+	}
+
+	if len(messages) != 3 {
+		t.Errorf("DequeueBatch() returned %d messages, want 3", len(messages))
+	}
+
+	// First message should be ID 5 or close to it
+	if messages[0].ID < 5 || messages[0].ID > 6 {
+		t.Errorf("First message ID = %d, want 5 or 6", messages[0].ID)
 	}
 }
