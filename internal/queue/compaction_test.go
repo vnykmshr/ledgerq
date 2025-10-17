@@ -172,7 +172,7 @@ func TestManualCompaction(t *testing.T) {
 	initialSegmentCount := q.Stats().SegmentCount
 
 	// Manually trigger compaction
-	result, err := q.segments.Compact()
+	result, err := q.Compact()
 	if err != nil {
 		t.Fatalf("Compact() error = %v", err)
 	}

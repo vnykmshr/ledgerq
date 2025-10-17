@@ -279,7 +279,7 @@ func TestIntegration_WithCompaction(t *testing.T) {
 	segmentsBefore := q.Stats().SegmentCount
 
 	// Compact
-	result, err := q.segments.Compact()
+	result, err := q.Compact()
 	if err != nil {
 		t.Fatalf("Compact() error = %v", err)
 	}

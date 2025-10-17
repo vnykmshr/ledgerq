@@ -45,12 +45,12 @@ import (
     "fmt"
     "log"
 
-    "github.com/vnykmshr/ledgerq/internal/queue"
+    "github.com/vnykmshr/ledgerq/pkg/ledgerq"
 )
 
 func main() {
     // Open a queue
-    q, err := queue.Open("/path/to/queue", nil)
+    q, err := ledgerq.Open("/path/to/queue", nil)
     if err != nil {
         log.Fatal(err)
     }
@@ -137,7 +137,7 @@ msg, err := q.Dequeue()
 #### Segment Management
 
 ```go
-import "github.com/vnykmshr/ledgerq/internal/segment"
+import "github.com/vnykmshr/ledgerq/pkg/ledgerq"
 
 opts := queue.DefaultOptions("/path/to/queue")
 
@@ -180,7 +180,7 @@ fmt.Printf("Removed %d segments, freed %d bytes\n",
 #### Logging
 
 ```go
-import "github.com/vnykmshr/ledgerq/internal/logging"
+import "github.com/vnykmshr/ledgerq/pkg/ledgerq"
 
 opts := queue.DefaultOptions("/path/to/queue")
 

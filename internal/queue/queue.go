@@ -735,3 +735,16 @@ func (q *Queue) Stats() *Stats {
 		SegmentCount:    len(segments),
 	}
 }
+
+// Compact manually triggers compaction of old segments based on retention policy.
+// Returns the compaction result with segments removed and bytes freed.
+func (q *Queue) Compact() (*segment.CompactionResult, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	if q.closed {
+		return nil, fmt.Errorf("queue is closed")
+	}
+
+	return q.segments.Compact()
+}

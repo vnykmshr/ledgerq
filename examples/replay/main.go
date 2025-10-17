@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/vnykmshr/ledgerq/internal/queue"
+	"github.com/vnykmshr/ledgerq/pkg/ledgerq"
 )
 
 func main() {
@@ -22,7 +22,7 @@ func main() {
 	fmt.Println("======================")
 
 	// Open the queue
-	q, err := queue.Open(queueDir, nil)
+	q, err := ledgerq.Open(queueDir, nil)
 	if err != nil {
 		log.Fatalf("Failed to open queue: %v", err)
 	}
