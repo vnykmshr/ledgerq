@@ -2,6 +2,7 @@ package segment
 
 import (
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -25,6 +26,31 @@ const (
 	RotateByBoth
 )
 
+// RetentionPolicy defines how to retain/remove old segments.
+type RetentionPolicy struct {
+	// MaxAge is the max age of segments to keep (0 = no age limit)
+	MaxAge time.Duration
+
+	// MaxSize is the max total size of all segments (0 = no size limit)
+	MaxSize uint64
+
+	// MaxSegments is the max number of segments to keep (0 = no count limit)
+	MaxSegments int
+
+	// MinSegments is the minimum number of segments to always keep (even if they exceed limits)
+	MinSegments int
+}
+
+// DefaultRetentionPolicy returns sensible defaults.
+func DefaultRetentionPolicy() *RetentionPolicy {
+	return &RetentionPolicy{
+		MaxAge:      7 * 24 * time.Hour, // 7 days
+		MaxSize:     0,                  // No size limit
+		MaxSegments: 0,                  // No count limit
+		MinSegments: 1,                  // Always keep at least 1 segment
+	}
+}
+
 // ManagerOptions configures segment manager behavior.
 type ManagerOptions struct {
 	// Directory where segments are stored
@@ -44,6 +70,9 @@ type ManagerOptions struct {
 
 	// WriterOptions for creating new segments
 	WriterOptions *WriterOptions
+
+	// RetentionPolicy for cleaning up old segments
+	RetentionPolicy *RetentionPolicy
 }
 
 // DefaultManagerOptions returns sensible defaults for segment management.
@@ -55,6 +84,7 @@ func DefaultManagerOptions(dir string) *ManagerOptions {
 		MaxSegmentMessages: 1000000,           // 1M messages
 		MaxSegmentAge:      24 * time.Hour,    // 24 hours
 		WriterOptions:      DefaultWriterOptions(),
+		RetentionPolicy:    DefaultRetentionPolicy(),
 	}
 }
 
@@ -314,4 +344,169 @@ func (m *Manager) GetActiveWriterStats() *ActiveWriterStats {
 		MessagesWritten: m.activeWriter.MessagesWritten(),
 		Age:             time.Since(m.segmentCreated),
 	}
+}
+
+// CompactionResult contains information about a compaction operation.
+type CompactionResult struct {
+	// SegmentsRemoved is the number of segments removed
+	SegmentsRemoved int
+
+	// BytesFreed is the total bytes freed
+	BytesFreed int64
+
+	// OldestSegmentAge is the age of the oldest remaining segment
+	OldestSegmentAge time.Duration
+}
+
+// Compact removes old segments according to the retention policy.
+// Returns information about what was removed.
+func (m *Manager) Compact() (*CompactionResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.closed {
+		return nil, fmt.Errorf("manager is closed")
+	}
+
+	if m.opts.RetentionPolicy == nil {
+		return &CompactionResult{}, nil
+	}
+
+	policy := m.opts.RetentionPolicy
+
+	// Determine which segments to remove
+	toRemove := m.selectSegmentsForRemoval(policy)
+
+	if len(toRemove) == 0 {
+		return &CompactionResult{}, nil
+	}
+
+	// Remove the segments
+	var bytesFreed int64
+	for _, seg := range toRemove {
+		bytesFreed += seg.Size
+
+		// Remove segment file
+		if err := removeFile(seg.Path); err != nil {
+			return nil, fmt.Errorf("failed to remove segment %s: %w", seg.Path, err)
+		}
+
+		// Remove index file if it exists
+		if seg.IndexPath != "" {
+			_ = removeFile(seg.IndexPath) // Ignore error if index doesn't exist
+		}
+	}
+
+	// Update segments list
+	newSegments := make([]*SegmentInfo, 0, len(m.segments)-len(toRemove))
+	removeSet := make(map[uint64]bool)
+	for _, seg := range toRemove {
+		removeSet[seg.BaseOffset] = true
+	}
+
+	for _, seg := range m.segments {
+		if !removeSet[seg.BaseOffset] {
+			newSegments = append(newSegments, seg)
+		}
+	}
+	m.segments = newSegments
+
+	// Calculate oldest segment age
+	var oldestAge time.Duration
+	if len(m.segments) > 0 {
+		oldestSeg := m.segments[0]
+		if info, err := getFileInfo(oldestSeg.Path); err == nil {
+			oldestAge = time.Since(info.ModTime())
+		}
+	}
+
+	return &CompactionResult{
+		SegmentsRemoved:  len(toRemove),
+		BytesFreed:       bytesFreed,
+		OldestSegmentAge: oldestAge,
+	}, nil
+}
+
+// selectSegmentsForRemoval determines which segments should be removed.
+// Must be called with lock held.
+func (m *Manager) selectSegmentsForRemoval(policy *RetentionPolicy) []*SegmentInfo {
+	if len(m.segments) == 0 {
+		return nil
+	}
+
+	// Always keep at least MinSegments
+	if len(m.segments) <= policy.MinSegments {
+		return nil
+	}
+
+	var toRemove []*SegmentInfo
+	now := time.Now()
+
+	// Check each segment against retention policies
+	for i, seg := range m.segments {
+		// Ensure we keep at least MinSegments
+		remaining := len(m.segments) - len(toRemove)
+		if remaining <= policy.MinSegments {
+			break
+		}
+
+		// Don't remove the last segment (even if it exceeds limits)
+		if i == len(m.segments)-1 {
+			break
+		}
+
+		shouldRemove := false
+
+		// Check age-based retention
+		if policy.MaxAge > 0 {
+			if info, err := getFileInfo(seg.Path); err == nil {
+				age := now.Sub(info.ModTime())
+				if age > policy.MaxAge {
+					shouldRemove = true
+				}
+			}
+		}
+
+		// Check count-based retention
+		if policy.MaxSegments > 0 {
+			if len(m.segments)-len(toRemove) > policy.MaxSegments {
+				shouldRemove = true
+			}
+		}
+
+		// Check size-based retention
+		if policy.MaxSize > 0 {
+			totalSize := m.calculateTotalSize(m.segments[i:])
+			if totalSize > policy.MaxSize {
+				shouldRemove = true
+			}
+		}
+
+		if shouldRemove {
+			toRemove = append(toRemove, seg)
+		}
+	}
+
+	return toRemove
+}
+
+// calculateTotalSize calculates the total size of a set of segments.
+func (m *Manager) calculateTotalSize(segments []*SegmentInfo) uint64 {
+	var total uint64
+	for _, seg := range segments {
+		if seg.Size > 0 {
+			total += uint64(seg.Size)
+		}
+	}
+	return total
+}
+
+// Helper functions for file operations
+
+func removeFile(path string) error {
+	return os.Remove(path)
+}
+
+func getFileInfo(path string) (os.FileInfo, error) {
+	return os.Stat(path)
 }
