@@ -15,6 +15,7 @@ Go developers often need a simple, reliable queue for embedded or local-first ap
 - **Auto-compaction** with retention policies
 - **Thread-safe** concurrent access
 - **Pluggable logging** for observability
+- **CLI tool** for queue inspection and management
 
 ## Features
 
@@ -207,6 +208,56 @@ fmt.Printf("Pending messages: %d\n", stats.PendingMessages)
 fmt.Printf("Segments: %d\n", stats.SegmentCount)
 fmt.Printf("Next message ID: %d\n", stats.NextMessageID)
 fmt.Printf("Read position: %d\n", stats.ReadMessageID)
+```
+
+## CLI Tool
+
+LedgerQ includes a command-line tool for queue inspection and management.
+
+### Installation
+
+```bash
+go install github.com/vnykmshr/ledgerq/cmd/ledgerq@latest
+```
+
+Or build from source:
+
+```bash
+go build -o ledgerq ./cmd/ledgerq
+```
+
+### Commands
+
+```bash
+# Show queue statistics
+ledgerq stats /path/to/queue
+
+# Detailed inspection (JSON output)
+ledgerq inspect /path/to/queue
+
+# Manually trigger compaction
+ledgerq compact /path/to/queue
+
+# Peek at next N messages without consuming
+ledgerq peek /path/to/queue 5
+
+# Show version
+ledgerq version
+```
+
+### Example Output
+
+```
+$ ledgerq stats /path/to/queue
+Queue Statistics
+================
+Directory:         /path/to/queue
+Total Messages:    20
+Pending Messages:  10
+Next Message ID:   21
+Read Message ID:   11
+Segment Count:     2
+Consumed:          50.0%
 ```
 
 ## Examples
