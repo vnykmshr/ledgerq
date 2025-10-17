@@ -3,6 +3,7 @@ package queue
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 func BenchmarkEnqueue(b *testing.B) {
@@ -289,5 +290,93 @@ func BenchmarkStats(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = q.Stats()
+	}
+}
+
+// Benchmark replay operations
+func BenchmarkSeekToMessageID(b *testing.B) {
+	tmpDir := b.TempDir()
+
+	q, err := Open(tmpDir, nil)
+	if err != nil {
+		b.Fatalf("Open() error = %v", err)
+	}
+	defer func() { _ = q.Close() }()
+
+	// Enqueue 1000 messages
+	for i := 0; i < 1000; i++ {
+		if _, err := q.Enqueue([]byte("benchmark message")); err != nil {
+			b.Fatalf("Enqueue() error = %v", err)
+		}
+	}
+	_ = q.Sync()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Seek to middle
+		if err := q.SeekToMessageID(500); err != nil {
+			b.Fatalf("SeekToMessageID() error = %v", err)
+		}
+	}
+}
+
+func BenchmarkSeekToTimestamp(b *testing.B) {
+	tmpDir := b.TempDir()
+
+	q, err := Open(tmpDir, nil)
+	if err != nil {
+		b.Fatalf("Open() error = %v", err)
+	}
+	defer func() { _ = q.Close() }()
+
+	// Enqueue 1000 messages, capturing a timestamp in the middle
+	var midTimestamp int64
+	for i := 0; i < 1000; i++ {
+		if i == 500 {
+			midTimestamp = time.Now().UnixNano()
+		}
+		if _, err := q.Enqueue([]byte("benchmark message")); err != nil {
+			b.Fatalf("Enqueue() error = %v", err)
+		}
+	}
+	_ = q.Sync()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Seek to middle by timestamp
+		_ = q.SeekToTimestamp(midTimestamp)
+	}
+}
+
+func BenchmarkReplayAndRead(b *testing.B) {
+	tmpDir := b.TempDir()
+
+	q, err := Open(tmpDir, nil)
+	if err != nil {
+		b.Fatalf("Open() error = %v", err)
+	}
+	defer func() { _ = q.Close() }()
+
+	// Enqueue 100 messages
+	for i := 0; i < 100; i++ {
+		if _, err := q.Enqueue([]byte("benchmark message")); err != nil {
+			b.Fatalf("Enqueue() error = %v", err)
+		}
+	}
+	_ = q.Sync()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Seek to start
+		if err := q.SeekToMessageID(1); err != nil {
+			b.Fatalf("SeekToMessageID() error = %v", err)
+		}
+
+		// Read 10 messages
+		for j := 0; j < 10; j++ {
+			if _, err := q.Dequeue(); err != nil {
+				b.Fatalf("Dequeue() error = %v", err)
+			}
+		}
 	}
 }
