@@ -356,7 +356,13 @@ go test -bench=. ./internal/queue
 
 # Specific benchmark
 go test -bench=BenchmarkConcurrent ./internal/queue
+
+# Fuzzing tests (Go 1.18+)
+go test -fuzz=FuzzEntry -fuzztime=30s ./internal/format
+go test -fuzz=FuzzEnqueueDequeue -fuzztime=30s ./internal/queue
 ```
+
+See [internal/format/FUZZING.md](internal/format/FUZZING.md) for detailed fuzzing instructions.
 
 ## Project Status
 
