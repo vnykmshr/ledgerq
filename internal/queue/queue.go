@@ -35,6 +35,7 @@ import (
 
 	"github.com/vnykmshr/ledgerq/internal/format"
 	"github.com/vnykmshr/ledgerq/internal/logging"
+	"github.com/vnykmshr/ledgerq/internal/metrics"
 	"github.com/vnykmshr/ledgerq/internal/segment"
 )
 
@@ -54,6 +55,23 @@ type Options struct {
 
 	// Logger for structured logging (nil = no logging)
 	Logger logging.Logger
+
+	// MetricsCollector for collecting queue metrics (nil = no metrics)
+	MetricsCollector MetricsCollector
+}
+
+// MetricsCollector defines the interface for recording queue metrics.
+type MetricsCollector interface {
+	RecordEnqueue(payloadSize int, duration time.Duration)
+	RecordDequeue(payloadSize int, duration time.Duration)
+	RecordEnqueueBatch(count, totalPayloadSize int, duration time.Duration)
+	RecordDequeueBatch(count, totalPayloadSize int, duration time.Duration)
+	RecordEnqueueError()
+	RecordDequeueError()
+	RecordSeek()
+	RecordCompaction(segmentsRemoved int, bytesFreed int64, duration time.Duration)
+	RecordCompactionError()
+	UpdateQueueState(pending, segments, nextMsgID, readMsgID uint64)
 }
 
 // DefaultOptions returns sensible defaults for queue configuration.
@@ -62,8 +80,9 @@ func DefaultOptions(dir string) *Options {
 		SegmentOptions:     segment.DefaultManagerOptions(dir),
 		AutoSync:           false,
 		SyncInterval:       1 * time.Second,
-		CompactionInterval: 0, // Disabled by default
+		CompactionInterval: 0,                  // Disabled by default
 		Logger:             logging.NoopLogger{}, // No logging by default
+		MetricsCollector:   metrics.NoopCollector{}, // No metrics by default
 	}
 }
 
@@ -155,6 +174,15 @@ func Open(dir string, opts *Options) (*Queue, error) {
 		q.startCompactionTimer()
 	}
 
+	// Update initial metrics state
+	stats := q.Stats()
+	opts.MetricsCollector.UpdateQueueState(
+		stats.PendingMessages,
+		uint64(stats.SegmentCount),
+		stats.NextMessageID,
+		stats.ReadMessageID,
+	)
+
 	// Log queue opened
 	opts.Logger.Info("queue opened",
 		logging.F("dir", dir),
@@ -210,10 +238,13 @@ func recoverState(segments *segment.Manager) (nextMsgID, readMsgID uint64, err e
 // Enqueue appends a message to the queue.
 // Returns the offset where the message was written.
 func (q *Queue) Enqueue(payload []byte) (uint64, error) {
+	start := time.Now()
+
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	if q.closed {
+		q.opts.MetricsCollector.RecordEnqueueError()
 		return 0, fmt.Errorf("queue is closed")
 	}
 
@@ -231,6 +262,7 @@ func (q *Queue) Enqueue(payload []byte) (uint64, error) {
 	// Write to segment
 	offset, err := q.segments.Write(entry)
 	if err != nil {
+		q.opts.MetricsCollector.RecordEnqueueError()
 		q.opts.Logger.Error("enqueue failed",
 			logging.F("msg_id", msgID),
 			logging.F("error", err.Error()),
@@ -259,6 +291,9 @@ func (q *Queue) Enqueue(payload []byte) (uint64, error) {
 		logging.F("payload_size", len(payload)),
 	)
 
+	// Record metrics
+	q.opts.MetricsCollector.RecordEnqueue(len(payload), time.Since(start))
+
 	return offset, nil
 }
 
@@ -267,6 +302,8 @@ func (q *Queue) Enqueue(payload []byte) (uint64, error) {
 // a single fsync for all messages.
 // Returns the offsets where the messages were written.
 func (q *Queue) EnqueueBatch(payloads [][]byte) ([]uint64, error) {
+	start := time.Now()
+
 	if len(payloads) == 0 {
 		return nil, fmt.Errorf("empty batch")
 	}
@@ -275,11 +312,13 @@ func (q *Queue) EnqueueBatch(payloads [][]byte) ([]uint64, error) {
 	defer q.mu.Unlock()
 
 	if q.closed {
+		q.opts.MetricsCollector.RecordEnqueueError()
 		return nil, fmt.Errorf("queue is closed")
 	}
 
 	offsets := make([]uint64, len(payloads))
 	timestamp := time.Now().UnixNano()
+	totalBytes := 0
 
 	// Write all entries
 	for i, payload := range payloads {
@@ -295,10 +334,12 @@ func (q *Queue) EnqueueBatch(payloads [][]byte) ([]uint64, error) {
 		if err != nil {
 			// On error, sync what we've written so far
 			_ = q.segments.Sync()
+			q.opts.MetricsCollector.RecordEnqueueError()
 			return offsets[:i], fmt.Errorf("failed to write entry %d: %w", i, err)
 		}
 
 		offsets[i] = offset
+		totalBytes += len(payload)
 		q.nextMsgID++
 	}
 
@@ -320,6 +361,9 @@ func (q *Queue) EnqueueBatch(payloads [][]byte) ([]uint64, error) {
 		logging.F("last_msg_id", q.nextMsgID-1),
 	)
 
+	// Record metrics
+	q.opts.MetricsCollector.RecordEnqueueBatch(len(payloads), totalBytes, time.Since(start))
+
 	return offsets, nil
 }
 
@@ -339,22 +383,27 @@ type Message struct {
 }
 
 // Dequeue retrieves the next message from the queue.
-// Returns an error if no messages are available.
+// Returns an error if no messages available.
 func (q *Queue) Dequeue() (*Message, error) {
+	start := time.Now()
+
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	if q.closed {
+		q.opts.MetricsCollector.RecordDequeueError()
 		return nil, fmt.Errorf("queue is closed")
 	}
 
 	// Check if there are any messages to read
 	if q.readMsgID >= q.nextMsgID {
+		q.opts.MetricsCollector.RecordDequeueError()
 		return nil, fmt.Errorf("no messages available")
 	}
 
 	// Ensure data is flushed to disk before reading
 	if err := q.segments.Sync(); err != nil {
+		q.opts.MetricsCollector.RecordDequeueError()
 		return nil, fmt.Errorf("failed to sync before dequeue: %w", err)
 	}
 
@@ -396,10 +445,14 @@ func (q *Queue) Dequeue() (*Message, error) {
 				return msg, fmt.Errorf("failed to update metadata: %w", err)
 			}
 
+			// Record metrics
+			q.opts.MetricsCollector.RecordDequeue(len(msg.Payload), time.Since(start))
+
 			return msg, nil
 		}
 	}
 
+	q.opts.MetricsCollector.RecordDequeueError()
 	return nil, fmt.Errorf("message ID %d not found", q.readMsgID)
 }
 
@@ -407,6 +460,8 @@ func (q *Queue) Dequeue() (*Message, error) {
 // Returns fewer messages if the queue has fewer than maxMessages available.
 // Returns an error if no messages are available.
 func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
+	start := time.Now()
+
 	if maxMessages <= 0 {
 		return nil, fmt.Errorf("maxMessages must be > 0")
 	}
@@ -415,16 +470,19 @@ func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 	defer q.mu.Unlock()
 
 	if q.closed {
+		q.opts.MetricsCollector.RecordDequeueError()
 		return nil, fmt.Errorf("queue is closed")
 	}
 
 	// Check if there are any messages to read
 	if q.readMsgID >= q.nextMsgID {
+		q.opts.MetricsCollector.RecordDequeueError()
 		return nil, fmt.Errorf("no messages available")
 	}
 
 	// Ensure data is flushed to disk before reading
 	if err := q.segments.Sync(); err != nil {
+		q.opts.MetricsCollector.RecordDequeueError()
 		return nil, fmt.Errorf("failed to sync before dequeue: %w", err)
 	}
 
@@ -436,6 +494,7 @@ func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 	}
 
 	messages := make([]*Message, 0, count)
+	totalBytes := 0
 
 	// Get all segments
 	allSegments := q.segments.GetSegments()
@@ -467,6 +526,7 @@ func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 					Timestamp: entry.Timestamp,
 				}
 				messages = append(messages, msg)
+				totalBytes += len(msg.Payload)
 				found = true
 				break
 			}
@@ -487,8 +547,12 @@ func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 	}
 
 	if len(messages) == 0 {
+		q.opts.MetricsCollector.RecordDequeueError()
 		return nil, fmt.Errorf("no messages could be read")
 	}
+
+	// Record metrics
+	q.opts.MetricsCollector.RecordDequeueBatch(len(messages), totalBytes, time.Since(start))
 
 	return messages, nil
 }
@@ -520,6 +584,9 @@ func (q *Queue) SeekToMessageID(msgID uint64) error {
 	if err := q.metadata.SetReadMsgID(q.readMsgID); err != nil {
 		return fmt.Errorf("failed to update metadata: %w", err)
 	}
+
+	// Record metrics
+	q.opts.MetricsCollector.RecordSeek()
 
 	return nil
 }
@@ -566,6 +633,9 @@ func (q *Queue) SeekToTimestamp(timestamp int64) error {
 			if err := q.metadata.SetReadMsgID(q.readMsgID); err != nil {
 				return fmt.Errorf("failed to update metadata: %w", err)
 			}
+
+			// Record metrics
+			q.opts.MetricsCollector.RecordSeek()
 
 			return nil
 		}
@@ -669,15 +739,19 @@ func (q *Queue) startSyncTimer() {
 // startCompactionTimer starts the periodic compaction timer.
 func (q *Queue) startCompactionTimer() {
 	q.compactionTimer = time.AfterFunc(q.opts.CompactionInterval, func() {
+		start := time.Now()
+
 		q.mu.RLock()
 		if !q.closed {
 			// Run compaction in background
 			result, err := q.segments.Compact()
 			if err != nil {
+				q.opts.MetricsCollector.RecordCompactionError()
 				q.opts.Logger.Error("background compaction failed",
 					logging.F("error", err.Error()),
 				)
 			} else if result.SegmentsRemoved > 0 {
+				q.opts.MetricsCollector.RecordCompaction(result.SegmentsRemoved, result.BytesFreed, time.Since(start))
 				q.opts.Logger.Info("background compaction completed",
 					logging.F("segments_removed", result.SegmentsRemoved),
 					logging.F("bytes_freed", result.BytesFreed),
@@ -739,12 +813,24 @@ func (q *Queue) Stats() *Stats {
 // Compact manually triggers compaction of old segments based on retention policy.
 // Returns the compaction result with segments removed and bytes freed.
 func (q *Queue) Compact() (*segment.CompactionResult, error) {
+	start := time.Now()
+
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 
 	if q.closed {
+		q.opts.MetricsCollector.RecordCompactionError()
 		return nil, fmt.Errorf("queue is closed")
 	}
 
-	return q.segments.Compact()
+	result, err := q.segments.Compact()
+	if err != nil {
+		q.opts.MetricsCollector.RecordCompactionError()
+		return nil, err
+	}
+
+	// Record metrics
+	q.opts.MetricsCollector.RecordCompaction(result.SegmentsRemoved, result.BytesFreed, time.Since(start))
+
+	return result, nil
 }

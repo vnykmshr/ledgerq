@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/vnykmshr/ledgerq/internal/logging"
+	"github.com/vnykmshr/ledgerq/internal/metrics"
 	"github.com/vnykmshr/ledgerq/internal/queue"
 	"github.com/vnykmshr/ledgerq/internal/segment"
 )
@@ -87,6 +88,24 @@ type Options struct {
 	// Logger for structured logging (nil = no logging)
 	// Default: no logging
 	Logger Logger
+
+	// MetricsCollector for collecting queue metrics (nil = no metrics)
+	// Default: no metrics
+	MetricsCollector MetricsCollector
+}
+
+// MetricsCollector defines the interface for recording queue metrics.
+type MetricsCollector interface {
+	RecordEnqueue(payloadSize int, duration time.Duration)
+	RecordDequeue(payloadSize int, duration time.Duration)
+	RecordEnqueueBatch(count, totalPayloadSize int, duration time.Duration)
+	RecordDequeueBatch(count, totalPayloadSize int, duration time.Duration)
+	RecordEnqueueError()
+	RecordDequeueError()
+	RecordSeek()
+	RecordCompaction(segmentsRemoved int, bytesFreed int64, duration time.Duration)
+	RecordCompactionError()
+	UpdateQueueState(pending, segments, nextMsgID, readMsgID uint64)
 }
 
 // RotationPolicy determines when segment rotation occurs.
@@ -159,6 +178,38 @@ type CompactionResult struct {
 	BytesFreed int64
 }
 
+// MetricsSnapshot is a point-in-time view of queue metrics.
+type MetricsSnapshot = metrics.Snapshot
+
+// NewMetricsCollector creates a new metrics collector for a queue.
+// The queue name is used to identify metrics from this specific queue.
+func NewMetricsCollector(queueName string) *metrics.Collector {
+	return metrics.NewCollector(queueName)
+}
+
+// GetMetricsSnapshot returns a snapshot of current metrics from a collector.
+func GetMetricsSnapshot(collector MetricsCollector) *MetricsSnapshot {
+	if c, ok := collector.(*metrics.Collector); ok {
+		return c.GetSnapshot()
+	}
+	return nil
+}
+
+// DefaultOptions returns sensible defaults for queue configuration.
+func DefaultOptions(dir string) *Options {
+	return &Options{
+		AutoSync:           false,
+		SyncInterval:       1 * time.Second,
+		CompactionInterval: 0, // Disabled by default
+		MaxSegmentSize:     1024 * 1024 * 1024, // 1GB
+		MaxSegmentMessages: 0, // Unlimited
+		RotationPolicy:     RotateBySize,
+		RetentionPolicy:    nil, // No retention
+		Logger:             nil, // No logging
+		MetricsCollector:   nil, // No metrics
+	}
+}
+
 // Open opens or creates a queue at the specified directory.
 // If opts is nil, default options are used.
 func Open(dir string, opts *Options) (*Queue, error) {
@@ -166,12 +217,18 @@ func Open(dir string, opts *Options) (*Queue, error) {
 	if opts == nil {
 		qopts = queue.DefaultOptions(dir)
 	} else {
+		metricsCollector := opts.MetricsCollector
+		if metricsCollector == nil {
+			metricsCollector = metrics.NoopCollector{}
+		}
+
 		qopts = &queue.Options{
 			SegmentOptions:     convertSegmentOptions(dir, opts),
 			AutoSync:           opts.AutoSync,
 			SyncInterval:       opts.SyncInterval,
 			CompactionInterval: opts.CompactionInterval,
 			Logger:             convertLogger(opts.Logger),
+			MetricsCollector:   metricsCollector,
 		}
 	}
 

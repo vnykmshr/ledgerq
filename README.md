@@ -15,6 +15,7 @@ Go developers often need a simple, reliable queue for embedded or local-first ap
 - **Auto-compaction** with retention policies
 - **Thread-safe** concurrent access
 - **Pluggable logging** for observability
+- **Metrics collection** for monitoring
 - **CLI tool** for queue inspection and management
 
 ## Features
@@ -29,6 +30,7 @@ Go developers often need a simple, reliable queue for embedded or local-first ap
 - ✅ **Thread-Safe** — Safe for concurrent producers and consumers
 - ✅ **Sparse Indexing** — Fast lookups with minimal overhead
 - ✅ **Pluggable Logging** — Optional structured logging
+- ✅ **Metrics Collection** — Zero-dependency metrics for monitoring
 - ✅ **Pure Go** — No C dependencies or external tools required
 
 ## Installation
@@ -210,6 +212,43 @@ fmt.Printf("Next message ID: %d\n", stats.NextMessageID)
 fmt.Printf("Read position: %d\n", stats.ReadMessageID)
 ```
 
+#### Metrics Collection
+
+```go
+import "github.com/vnykmshr/ledgerq/pkg/ledgerq"
+
+// Create a metrics collector
+collector := ledgerq.NewMetricsCollector("my_queue")
+
+opts := ledgerq.DefaultOptions("/path/to/queue")
+opts.MetricsCollector = collector
+
+q, _ := ledgerq.Open("/path/to/queue", opts)
+
+// Perform operations...
+q.Enqueue([]byte("test"))
+q.Dequeue()
+
+// Get metrics snapshot
+snapshot := ledgerq.GetMetricsSnapshot(collector)
+
+// Access metrics
+fmt.Printf("Enqueue Total: %d\n", snapshot.EnqueueTotal)
+fmt.Printf("Dequeue Total: %d\n", snapshot.DequeueTotal)
+fmt.Printf("Enqueue P95: %v\n", snapshot.EnqueueDurationP95)
+fmt.Printf("Pending Messages: %d\n", snapshot.PendingMessages)
+```
+
+**Available Metrics:**
+- Operation counters (enqueue, dequeue, batch, seek, errors)
+- Payload bytes (enqueued, dequeued)
+- Duration percentiles (P50, P95, P99 for enqueue/dequeue)
+- Queue state (pending messages, segments, message IDs)
+- Compaction metrics (compactions, segments removed, bytes freed)
+
+Metrics are collected in-memory with minimal overhead (atomic operations).
+No external dependencies required.
+
 ## CLI Tool
 
 LedgerQ includes a command-line tool for queue inspection and management.
@@ -267,12 +306,14 @@ See the [examples](examples/) directory for complete, runnable examples:
 - **[simple](examples/simple)**: Basic queue operations
 - **[producer-consumer](examples/producer-consumer)**: Multi-producer, multi-consumer pattern
 - **[replay](examples/replay)**: Replay and seeking capabilities
+- **[metrics](examples/metrics)**: Metrics collection and monitoring
 
 Run any example:
 ```bash
 go run examples/simple/main.go
 go run examples/producer-consumer/main.go
 go run examples/replay/main.go
+go run examples/metrics/main.go
 ```
 
 ## Architecture
