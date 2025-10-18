@@ -209,19 +209,17 @@ Example: `feat: add timestamp-based replay support`
 
 ```
 ledgerq/
-├── cmd/ledgerq/        # CLI tool
-├── internal/           # Private implementation packages
-│   ├── segment/       # Segment file management
-│   ├── index/         # Indexing logic
-│   ├── metadata/      # Metadata handling
-│   └── compaction/    # Compaction logic
-├── examples/          # Usage examples
-├── docs/              # Extended documentation
-├── queue.go           # Main Queue type (public API)
-├── options.go         # Configuration options
-├── message.go         # Message type
-├── stats.go           # Statistics/metrics
-└── errors.go          # Error definitions
+├── cmd/ledgerq/           # CLI tool
+├── pkg/ledgerq/           # Public API package
+├── internal/              # Private implementation packages
+│   ├── segment/          # Segment file management
+│   ├── format/           # Entry and index format
+│   ├── queue/            # Core queue implementation
+│   ├── metrics/          # Metrics collection
+│   └── logging/          # Logging interfaces
+├── examples/             # Usage examples
+├── .github/workflows/    # CI/CD configuration
+└── README.md, LICENSE    # Documentation and licensing
 ```
 
 ### Internal Packages
@@ -231,7 +229,7 @@ Code in `internal/` is private to the project. Only put code there if:
 - It shouldn't be imported by external projects
 - It might change frequently
 
-Public API should remain in the root package.
+Public API is in `pkg/ledgerq/` for proper Go module structure.
 
 ## Performance Considerations
 
