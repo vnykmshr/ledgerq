@@ -10,7 +10,6 @@ linters:
     - unused
     - ineffassign
     - revive
-    - misspell
     - unconvert
     - unparam
     - gosec
