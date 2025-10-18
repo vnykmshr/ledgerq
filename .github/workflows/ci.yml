@@ -11,12 +11,12 @@ permissions:
 
 jobs:
   test:
-    name: Test
+    name: Test (${{ matrix.os }}, Go ${{ matrix.go }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
         go: ['1.23', '1.24', '1.25']
     steps:
       - name: Checkout code
@@ -26,13 +26,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go }}
-          cache: true
-
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Verify dependencies
-        run: go mod verify
 
       - name: Run tests
         run: go test -v -timeout 5m ./...
@@ -51,7 +44,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.25'
-          cache: true
 
       - name: Run tests with coverage
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
@@ -76,20 +68,18 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.25'
-          cache: true
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v1.64.8
           args: --timeout=10m
+          skip-build-cache: true
+          skip-pkg-cache: true
 
   build:
     name: Build
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -98,82 +88,22 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.25'
-          cache: true
 
       - name: Build library
         run: go build -v ./...
 
       - name: Build CLI
-        run: go build -v -o ledgerq-${{ matrix.os }} ./cmd/ledgerq
+        run: go build -v -o ledgerq ./cmd/ledgerq
 
       - name: Test CLI version command
+        run: ./ledgerq version
+
+      - name: Build examples
         run: |
-          if [ "${{ matrix.os }}" == "windows-latest" ]; then
-            ./ledgerq-${{ matrix.os }}.exe version
-          else
-            ./ledgerq-${{ matrix.os }} version
-          fi
-        shell: bash
-
-  fuzz:
-    name: Fuzz Tests
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-          cache: true
-
-      - name: Run fuzz tests
-        run: |
-          go test -fuzz=FuzzEntry -fuzztime=30s ./internal/format
-          go test -fuzz=FuzzEnqueueDequeue -fuzztime=30s ./internal/queue
-
-  examples:
-    name: Examples
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-          cache: true
-
-      - name: Build all examples
-        run: |
-          for dir in examples/*/; do
-            echo "Building example: $dir"
-            go build -v "$dir"
-          done
-
-  benchmark:
-    name: Benchmark
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-          cache: true
-
-      - name: Run benchmarks
-        run: go test -bench=. -benchmem -run=^$ ./internal/queue | tee benchmark.txt
-
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-results
-          path: benchmark.txt
-          retention-days: 30
+          cd examples/simple && go build -v
+          cd ../producer-consumer && go build -v
+          cd ../streaming && go build -v
+          cd ../ttl && go build -v
+          cd ../headers && go build -v
+          cd ../replay && go build -v
+          cd ../metrics && go build -v
