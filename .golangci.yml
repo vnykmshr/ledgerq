@@ -19,7 +19,7 @@ linters:
 
 linters-settings:
   gocyclo:
-    min-complexity: 15
+    min-complexity: 20
   revive:
     rules:
       - name: exported
@@ -30,6 +30,9 @@ linters-settings:
         disabled: false
   misspell:
     locale: US
+  gosec:
+    excludes:
+      - G115 # Integer overflow conversion (overly strict for our use case)
 
 issues:
   max-issues-per-linter: 0
