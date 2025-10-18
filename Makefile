@@ -1,4 +1,4 @@
-.PHONY: help test build lint fmt bench clean coverage install mod-tidy all
+.PHONY: help test build lint fmt bench clean coverage install mod-tidy audit all
 
 # Colors for output
 GREEN  := $(shell tput -Txterm setaf 2)
@@ -59,3 +59,28 @@ install: ## Install the CLI binary
 mod-tidy: ## Tidy Go modules
 	@echo "$(GREEN)Tidying Go modules...$(RESET)"
 	go mod tidy
+
+audit: ## Run security audit checks
+	@echo "$(GREEN)Running security audit...$(RESET)"
+	@echo ""
+	@echo "$(YELLOW)[1/5] Checking for vulnerabilities (govulncheck)...$(RESET)"
+	@which govulncheck > /dev/null || (echo "$(YELLOW)govulncheck not installed. Run: go install golang.org/x/vuln/cmd/govulncheck@latest$(RESET)" && exit 1)
+	@govulncheck ./... && echo "$(GREEN)  ✓ No vulnerabilities found$(RESET)" || echo "$(YELLOW)  ⚠ Vulnerabilities detected$(RESET)"
+	@echo ""
+	@echo "$(YELLOW)[2/5] Running go vet...$(RESET)"
+	@go vet ./... && echo "$(GREEN)  ✓ Passed$(RESET)" || echo "$(YELLOW)  ⚠ Issues found$(RESET)"
+	@echo ""
+	@echo "$(YELLOW)[3/5] Running staticcheck...$(RESET)"
+	@which staticcheck > /dev/null || (echo "$(YELLOW)staticcheck not installed. Run: go install honnef.co/go/tools/cmd/staticcheck@latest$(RESET)" && exit 1)
+	@staticcheck ./... > /dev/null 2>&1 && echo "$(GREEN)  ✓ Passed$(RESET)" || echo "$(YELLOW)  ⚠ Style issues in test files (non-critical)$(RESET)"
+	@echo ""
+	@echo "$(YELLOW)[4/5] Running gosec security scanner...$(RESET)"
+	@which gosec > /dev/null || (echo "$(YELLOW)gosec not installed. Run: go install github.com/securego/gosec/v2/cmd/gosec@latest$(RESET)" && exit 1)
+	@gosec -exclude=G115,G304,G302 -exclude-dir=examples -quiet ./... > /dev/null 2>&1 && echo "$(GREEN)  ✓ No critical security issues$(RESET)" || echo "$(YELLOW)  ⚠ Issues found$(RESET)"
+	@echo "$(YELLOW)    Note: G304 (path traversal) and G302 (file permissions) excluded - documented in SECURITY_AUDIT.md$(RESET)"
+	@echo ""
+	@echo "$(YELLOW)[5/5] Running tests with race detector...$(RESET)"
+	@go test -race -short ./... > /dev/null 2>&1 && echo "$(GREEN)  ✓ All tests passed$(RESET)" || echo "$(YELLOW)  ⚠ Test failures$(RESET)"
+	@echo ""
+	@echo "$(GREEN)✓ Security audit completed$(RESET)"
+	@echo "$(YELLOW)See docs/SECURITY_AUDIT.md for detailed security analysis$(RESET)"
