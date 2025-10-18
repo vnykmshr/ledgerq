@@ -42,4 +42,7 @@ go.work
 
 # Development todos (workflow management)
 /todos/
+
+# Built binaries
 ledgerq-cli
+metrics
