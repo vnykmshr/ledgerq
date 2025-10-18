@@ -1,51 +1,48 @@
 # LedgerQ
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/github.com/vnykmshr/ledgerq.svg)](https://pkg.go.dev/github.com/vnykmshr/ledgerq/pkg/ledgerq)
 
-**LedgerQ** is a persistent, disk-backed message queue written in Go. It provides durable message storage with FIFO guarantees, automatic segment rotation, and efficient replay capabilities—all without external dependencies.
-
-## Why LedgerQ?
-
-Go developers often need a simple, reliable queue for embedded or local-first applications—something lighter than Kafka or NSQ, but more durable than in-memory channels. LedgerQ fills that gap by providing:
-
-- **Zero dependencies** beyond the Go standard library
-- **Crash-safe durability** with append-only log design
-- **Batch operations** for high throughput
-- **Streaming API** for real-time event processing
-- **Message TTL** for automatic expiration
-- **Message headers** for metadata and routing
-- **Replay capability** from message ID or timestamp
-- **Auto-compaction** with retention policies
-- **Thread-safe** concurrent access
-- **Pluggable logging** for observability
-- **Metrics collection** for monitoring
-- **CLI tool** for queue inspection and management
+A lightweight, persistent, disk-backed message queue for Go. Zero dependencies, crash-safe, and designed for embedded and local-first applications.
 
 ## Features
 
-- ✅ **Persistent Storage** — All messages durably written to disk
-- ✅ **FIFO Ordering** — Strict first-in-first-out guarantees
-- ✅ **Read Position Persistence** — Consumer offset tracked across restarts
-- ✅ **Automatic Segment Rotation** — Configurable by size, count, time, or both
-- ✅ **Batch Operations** — Efficient EnqueueBatch/DequeueBatch with single fsync
-- ✅ **Streaming API** — Real-time push-based message delivery with context support
-- ✅ **Message TTL** — Automatic expiration with lazy evaluation during dequeue
-- ✅ **Message Headers** — Key-value metadata for routing, tracing, and classification
-- ✅ **Replay Capabilities** — Seek by message ID or timestamp
-- ✅ **Compaction & Retention** — Automatic background or manual cleanup
-- ✅ **Thread-Safe** — Safe for concurrent producers and consumers
-- ✅ **Sparse Indexing** — Fast lookups with minimal overhead
-- ✅ **Pluggable Logging** — Optional structured logging
-- ✅ **Metrics Collection** — Zero-dependency metrics for monitoring
-- ✅ **Pure Go** — No C dependencies or external tools required
+- 🔒 **Crash-safe durability** with append-only log design
+- 📦 **Zero dependencies** beyond the Go standard library
+- 🚀 **High throughput** with batch operations
+- 🔄 **Replay capability** from message ID or timestamp
+- ⏰ **Message TTL** for automatic expiration
+- 🏷️ **Message headers** for metadata and routing
+- 📊 **Metrics & logging** for observability
+- 🧹 **Auto-compaction** with retention policies
+- 🔀 **Thread-safe** for concurrent access
+- 🛠️ **CLI tool** for queue management
 
-## Installation
+## Why LedgerQ?
+
+Go developers often need a simple, reliable queue for embedded or local-first applications—something lighter than Kafka or NSQ, but more durable than in-memory channels. LedgerQ fills that gap.
+
+**Ideal for**:
+- Offline task queues
+- Event sourcing and audit logs
+- Local message buffering
+- Edge/IoT applications
+- Development and testing
+
+**Not for**:
+- High-throughput distributed systems (use Kafka, NATS)
+- Multi-node scenarios (single-node only)
+- Multiple independent consumers (use separate queues)
+
+## Quick Start
+
+### Installation
 
 ```bash
 go get github.com/vnykmshr/ledgerq
 ```
 
-## Quick Start
+### Basic Usage
 
 ```go
 package main
@@ -59,443 +56,151 @@ import (
 
 func main() {
     // Open a queue
-    q, err := ledgerq.Open("/path/to/queue", nil)
+    q, err := ledgerq.Open("/tmp/myqueue", nil)
     if err != nil {
         log.Fatal(err)
     }
     defer q.Close()
 
     // Enqueue a message
-    offset, err := q.Enqueue([]byte("Hello, World!"))
-    if err != nil {
-        log.Fatal(err)
-    }
+    offset, _ := q.Enqueue([]byte("Hello, World!"))
     fmt.Printf("Enqueued at offset: %d\n", offset)
 
     // Dequeue a message
-    msg, err := q.Dequeue()
-    if err != nil {
-        log.Fatal(err)
-    }
+    msg, _ := q.Dequeue()
     fmt.Printf("Dequeued [ID:%d]: %s\n", msg.ID, msg.Payload)
 }
 ```
 
-## Usage
-
-### Basic Operations
-
-#### Opening a Queue
+### Configuration
 
 ```go
-// Use default options
-q, err := queue.Open("/path/to/queue", nil)
+opts := ledgerq.DefaultOptions("/tmp/myqueue")
+opts.AutoSync = true                       // fsync after every write
+opts.MaxSegmentSize = 100 * 1024 * 1024   // 100MB segments
+opts.CompactionInterval = 5 * time.Minute  // Auto-compact every 5 min
 
-// Or configure options
-opts := queue.DefaultOptions("/path/to/queue")
-opts.AutoSync = true  // Sync after every write
-opts.SyncInterval = 1 * time.Second
-q, err := queue.Open("/path/to/queue", opts)
+q, _ := ledgerq.Open("/tmp/myqueue", opts)
 ```
 
-#### Enqueuing Messages
+## Core Operations
+
+### Batch Operations (10-100x faster)
 
 ```go
-// Single message
-offset, err := q.Enqueue([]byte("message"))
-
-// Batch (more efficient - single fsync)
+// Enqueue batch
 payloads := [][]byte{
-    []byte("message1"),
-    []byte("message2"),
-    []byte("message3"),
+    []byte("msg1"),
+    []byte("msg2"),
+    []byte("msg3"),
 }
-offsets, err := q.EnqueueBatch(payloads)
+offsets, _ := q.EnqueueBatch(payloads)
+
+// Dequeue batch
+messages, _ := q.DequeueBatch(10) // up to 10 messages
 ```
 
-#### Dequeuing Messages
+### Message TTL
 
 ```go
-// Single message
-msg, err := q.Dequeue()
-if err != nil {
-    // No messages available
-}
-fmt.Printf("ID: %d, Payload: %s\n", msg.ID, msg.Payload)
-
-// Batch
-messages, err := q.DequeueBatch(10) // Read up to 10 messages
-```
-
-#### Message TTL (Time-To-Live)
-
-```go
-import "time"
-
-// Enqueue message that expires after 5 seconds
-offset, err := q.EnqueueWithTTL([]byte("temporary message"), 5*time.Second)
+// Expire after 5 seconds
+q.EnqueueWithTTL([]byte("temporary"), 5*time.Second)
 
 // Dequeue automatically skips expired messages
-msg, err := q.Dequeue()  // Will skip expired messages
-
-// Check if message has TTL
-if msg.ExpiresAt > 0 {
-    expiresIn := time.Until(time.Unix(0, msg.ExpiresAt))
-    fmt.Printf("Message expires in: %v\n", expiresIn)
-}
+msg, _ := q.Dequeue()
 ```
 
-**TTL Features:**
-- Messages expire automatically after specified duration
-- Expired messages skipped during dequeue (lazy expiration)
-- Works with both single and batch dequeue operations
-- TTL is persisted across queue restarts
-- Mix TTL and non-TTL messages in same queue
-- Zero overhead for non-TTL messages
-
-**Use Cases:**
-- Temporary task queues with expiration
-- Time-sensitive notifications
-- Cache invalidation messages
-- Session management events
-- Rate limiting with time windows
-
-#### Message Headers (Metadata)
+### Message Headers
 
 ```go
-// Enqueue message with key-value metadata
 headers := map[string]string{
     "content-type":   "application/json",
-    "correlation-id": "12345",
-    "priority":       "high",
-    "source":         "service-a",
+    "correlation-id": "req-12345",
 }
-offset, err := q.EnqueueWithHeaders(payload, headers)
-
-// Dequeue returns message with headers
-msg, err := q.Dequeue()
-fmt.Printf("Type: %s\n", msg.Headers["content-type"])
-fmt.Printf("Priority: %s\n", msg.Headers["priority"])
-
-// Combine TTL and headers
-offset, err := q.EnqueueWithOptions(payload, 5*time.Second, headers)
+q.EnqueueWithHeaders(payload, headers)
 ```
 
-**Headers Features:**
-- Key-value metadata stored with each message
-- Headers persist across queue restarts
-- Works with both single and batch dequeue operations
-- Combine with TTL for classified temporary messages
-- Zero overhead for messages without headers
-
-**Use Cases:**
-- Message routing and classification
-- Distributed tracing (trace-id, span-id, correlation-id)
-- Event sourcing metadata (aggregate-id, event-type, version)
-- Workflow orchestration (step tracking, retry counts)
-- Content-type indication
-- Message schema versioning
-- Priority and SLA management
-
-#### Streaming Messages
+### Streaming API
 
 ```go
-import "context"
-
-// Create a handler function
-handler := func(msg *ledgerq.Message) error {
-    fmt.Printf("Received: %s\n", msg.Payload)
-    return nil  // Return error to stop streaming
-}
-
-// Stream with context cancellation
 ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 defer cancel()
 
-err := q.Stream(ctx, handler)
-// Returns when context is cancelled or handler returns error
+q.Stream(ctx, func(msg *ledgerq.Message) error {
+    fmt.Printf("Received: %s\n", msg.Payload)
+    return nil
+})
 ```
 
-**Benefits of Streaming:**
-- Real-time push-based delivery instead of polling
-- Automatic error handling and retry logic
-- Built-in context support for graceful shutdown
-- Cleaner code compared to manual polling loops
-- Consistent polling interval (100ms) with minimal overhead
-
-**Use Cases:**
-- Event-driven architectures
-- Real-time log processing
-- Message relay and forwarding
-- Continuous data pipelines
-- Live monitoring dashboards
-
-### Advanced Features
-
-#### Replay Operations
+### Replay
 
 ```go
-// Seek to specific message ID
-err := q.SeekToMessageID(100)
+// Seek to message ID
+q.SeekToMessageID(100)
 
-// Seek to first message at or after timestamp
-timestamp := time.Now().Add(-1 * time.Hour).UnixNano()
-err := q.SeekToTimestamp(timestamp)
-
-// Now dequeue from that position
-msg, err := q.Dequeue()
+// Seek to timestamp
+oneHourAgo := time.Now().Add(-1 * time.Hour).UnixNano()
+q.SeekToTimestamp(oneHourAgo)
 ```
 
-#### Segment Management
+## Performance
 
-```go
-import "github.com/vnykmshr/ledgerq/pkg/ledgerq"
+Benchmarks on modern hardware (Intel i5-8257U):
 
-opts := queue.DefaultOptions("/path/to/queue")
+| Operation | Throughput | Latency | Notes |
+|-----------|------------|---------|-------|
+| Enqueue (no sync) | ~3M ops/sec | 300-400 ns | Buffered |
+| Enqueue (AutoSync) | ~50 ops/sec | ~19 ms | With fsync |
+| EnqueueBatch 100 | ~50M msgs/sec | 200 ns/msg | Single fsync |
+| Dequeue | ~1.4K ops/sec | ~700 μs | With disk read |
 
-// Configure rotation policy
-opts.SegmentOptions.RotationPolicy = segment.RotateBySize
-opts.SegmentOptions.MaxSegmentSize = 100 * 1024 * 1024 // 100MB
-
-// Or rotate by message count
-opts.SegmentOptions.RotationPolicy = segment.RotateByCount
-opts.SegmentOptions.MaxSegmentMessages = 1000000
-
-// Or both (rotate when either limit is reached)
-opts.SegmentOptions.RotationPolicy = segment.RotateByBoth
-```
-
-#### Compaction and Retention
-
-```go
-opts := queue.DefaultOptions("/path/to/queue")
-
-// Configure retention policy
-opts.SegmentOptions.RetentionPolicy = &segment.RetentionPolicy{
-    MaxAge:      7 * 24 * time.Hour, // Keep 7 days
-    MaxSize:     10 * 1024 * 1024 * 1024, // Max 10GB total
-    MaxSegments: 100,  // Keep max 100 segments
-    MinSegments: 1,    // Always keep at least 1
-}
-
-// Enable automatic background compaction (optional)
-opts.CompactionInterval = 5 * time.Minute // Run every 5 minutes
-
-q, _ := queue.Open("/path/to/queue", opts)
-
-// Or manually trigger compaction anytime
-result, err := q.segments.Compact()
-fmt.Printf("Removed %d segments, freed %d bytes\n",
-    result.SegmentsRemoved, result.BytesFreed)
-```
-
-#### Logging
-
-```go
-import "github.com/vnykmshr/ledgerq/pkg/ledgerq"
-
-opts := queue.DefaultOptions("/path/to/queue")
-
-// Use default logger
-opts.Logger = logging.NewDefaultLogger(logging.LevelInfo)
-
-// Or implement your own
-type MyLogger struct{}
-
-func (l MyLogger) Debug(msg string, fields ...logging.Field) { /* ... */ }
-func (l MyLogger) Info(msg string, fields ...logging.Field)  { /* ... */ }
-func (l MyLogger) Warn(msg string, fields ...logging.Field)  { /* ... */ }
-func (l MyLogger) Error(msg string, fields ...logging.Field) { /* ... */ }
-
-opts.Logger = MyLogger{}
-```
-
-#### Queue Statistics
-
-```go
-stats := q.Stats()
-fmt.Printf("Total messages: %d\n", stats.TotalMessages)
-fmt.Printf("Pending messages: %d\n", stats.PendingMessages)
-fmt.Printf("Segments: %d\n", stats.SegmentCount)
-fmt.Printf("Next message ID: %d\n", stats.NextMessageID)
-fmt.Printf("Read position: %d\n", stats.ReadMessageID)
-```
-
-#### Metrics Collection
-
-```go
-import "github.com/vnykmshr/ledgerq/pkg/ledgerq"
-
-// Create a metrics collector
-collector := ledgerq.NewMetricsCollector("my_queue")
-
-opts := ledgerq.DefaultOptions("/path/to/queue")
-opts.MetricsCollector = collector
-
-q, _ := ledgerq.Open("/path/to/queue", opts)
-
-// Perform operations...
-q.Enqueue([]byte("test"))
-q.Dequeue()
-
-// Get metrics snapshot
-snapshot := ledgerq.GetMetricsSnapshot(collector)
-
-// Access metrics
-fmt.Printf("Enqueue Total: %d\n", snapshot.EnqueueTotal)
-fmt.Printf("Dequeue Total: %d\n", snapshot.DequeueTotal)
-fmt.Printf("Enqueue P95: %v\n", snapshot.EnqueueDurationP95)
-fmt.Printf("Pending Messages: %d\n", snapshot.PendingMessages)
-```
-
-**Available Metrics:**
-- Operation counters (enqueue, dequeue, batch, seek, errors)
-- Payload bytes (enqueued, dequeued)
-- Duration percentiles (P50, P95, P99 for enqueue/dequeue)
-- Queue state (pending messages, segments, message IDs)
-- Compaction metrics (compactions, segments removed, bytes freed)
-
-Metrics are collected in-memory with minimal overhead (atomic operations).
-No external dependencies required.
-
-## CLI Tool
-
-LedgerQ includes a command-line tool for queue inspection and management.
-
-### Installation
-
-```bash
-go install github.com/vnykmshr/ledgerq/cmd/ledgerq@latest
-```
-
-Or build from source:
-
-```bash
-go build -o ledgerq ./cmd/ledgerq
-```
-
-### Commands
-
-```bash
-# Show queue statistics
-ledgerq stats /path/to/queue
-
-# Detailed inspection (JSON output)
-ledgerq inspect /path/to/queue
-
-# Manually trigger compaction
-ledgerq compact /path/to/queue
-
-# Peek at next N messages without consuming
-ledgerq peek /path/to/queue 5
-
-# Show version
-ledgerq version
-```
-
-### Example Output
-
-```
-$ ledgerq stats /path/to/queue
-Queue Statistics
-================
-Directory:         /path/to/queue
-Total Messages:    20
-Pending Messages:  10
-Next Message ID:   21
-Read Message ID:   11
-Segment Count:     2
-Consumed:          50.0%
-```
+**Key takeaway**: Use batch operations for high throughput.
 
 ## Examples
 
-See the [examples](examples/) directory for complete, runnable examples:
+See the [examples/](examples/) directory for complete, runnable examples:
 
-- **[simple](examples/simple)**: Basic queue operations
-- **[producer-consumer](examples/producer-consumer)**: Multi-producer, multi-consumer pattern
-- **[streaming](examples/streaming)**: Real-time streaming with context cancellation
-- **[ttl](examples/ttl)**: Message expiration with TTL
-- **[headers](examples/headers)**: Message metadata and headers
-- **[replay](examples/replay)**: Replay and seeking capabilities
-- **[metrics](examples/metrics)**: Metrics collection and monitoring
+- **[simple](examples/simple)** - Basic queue operations
+- **[producer-consumer](examples/producer-consumer)** - Multi-goroutine pattern
+- **[streaming](examples/streaming)** - Real-time streaming API
+- **[ttl](examples/ttl)** - Message expiration
+- **[headers](examples/headers)** - Message metadata
+- **[replay](examples/replay)** - Seeking and replay
+- **[metrics](examples/metrics)** - Metrics collection
 
 Run any example:
 ```bash
 go run examples/simple/main.go
-go run examples/producer-consumer/main.go
-go run examples/streaming/main.go
-go run examples/ttl/main.go
-go run examples/headers/main.go
-go run examples/replay/main.go
-go run examples/metrics/main.go
 ```
 
-## Architecture
+## CLI Tool
 
-### Storage Format
-
-LedgerQ uses a log-structured design with segment-based storage:
-
-**Segments**: Messages stored in append-only `.log` files with companion `.idx` index files
-**Naming**: Zero-padded base offsets like `00000000000000001000.log`
-**Rotation**: Automatic based on size, count, or time policies
-
-**Entry Format** (26-34+ bytes + payload):
-- Length (4B) + Type (1B) + Flags (1B) + Message ID (8B) + Timestamp (8B) + [ExpiresAt (8B, optional)] + [Headers (variable, optional)] + Payload (variable) + CRC32 (4B)
-- ExpiresAt field only present when TTL flag is set
-- Headers field only present when Headers flag is set (format: NumHeaders:2 + [KeyLen:2 + Key:N + ValueLen:2 + Value:N]...)
-
-**Index Format** (sparse, every 4KB):
-- Message ID (8B) + Timestamp (8B) + File Offset (8B)
-
-### Performance
-
-Benchmarks on modern hardware (Intel i5-8257U):
-
-```
-Single Operations (without sync):
-  Enqueue:  ~300-400 ns/op
-  Dequeue:  ~700 μs/op (with disk read)
-
-Batch Operations (10 messages):
-  EnqueueBatch: ~2 μs/op (~200 ns per message)
-  DequeueBatch: ~7 μs/op (~700 ns per message)
-
-With AutoSync Enabled:
-  Enqueue:  ~19 ms/op (includes fsync)
-  EnqueueBatch (100): ~20 ms total (~200 μs per message)
-
-Concurrent (8 writers):
-  Enqueue:  ~350 ns/op (maintains performance)
-  Batch:    ~2.2 μs/op (excellent scalability)
+Install:
+```bash
+go install github.com/vnykmshr/ledgerq/cmd/ledgerq@latest
 ```
 
-**Key Takeaway**: Batching provides 10-100x performance improvement.
+Usage:
+```bash
+# Show statistics
+ledgerq stats /path/to/queue
 
-## Design Decisions
+# Inspect queue (JSON)
+ledgerq inspect /path/to/queue
 
-### Segment-Based Storage
+# Compact manually
+ledgerq compact /path/to/queue
 
-- **Efficient Compaction**: Remove old data without rewriting entire queue
-- **Bounded File Sizes**: Avoid single files growing too large
-- **Fast Startup**: Only scan last segment on recovery
-- **Better Caching**: OS can cache hot segments efficiently
+# Peek messages (without consuming)
+ledgerq peek /path/to/queue 5
+```
 
-### Read Position Persistence
+## Documentation
 
-Read position is automatically persisted to disk. After reopening, queues continue from where they left off. This enables true queue semantics where consumed messages remain consumed across restarts.
-
-- **Automatic**: Position updates on every dequeue operation
-- **Crash-Safe**: Metadata synced according to AutoSync option
-- **Recovery**: Hybrid approach using both metadata and segment scanning
-- **Seekable**: Explicit seeking updates persisted position
-
-### Sparse Indexing
-
-- **Space Efficient**: Index entries only every 4KB
-- **Fast Enough**: Sequential scan of 4KB is negligible
-- **Simple**: No complex index maintenance
+- **[Usage Guide](docs/USAGE.md)** - Comprehensive usage documentation
+- **[Architecture](docs/ARCHITECTURE.md)** - Internal design and implementation
+- **[API Reference](https://pkg.go.dev/github.com/vnykmshr/ledgerq/pkg/ledgerq)** - GoDoc documentation
+- **[Contributing](CONTRIBUTING.md)** - Development guidelines
 
 ## Testing
 
@@ -506,51 +211,16 @@ go test ./...
 # With race detector
 go test -race ./...
 
-# Integration tests
-go test -v ./internal/queue -run TestIntegration
-
 # Benchmarks
 go test -bench=. ./internal/queue
 
-# Specific benchmark
-go test -bench=BenchmarkConcurrent ./internal/queue
-
-# Fuzzing tests (Go 1.18+)
-go test -fuzz=FuzzEntry -fuzztime=30s ./internal/format
+# Fuzzing (Go 1.18+)
 go test -fuzz=FuzzEnqueueDequeue -fuzztime=30s ./internal/queue
 ```
 
-See [internal/format/FUZZING.md](internal/format/FUZZING.md) for detailed fuzzing instructions.
-
-## Project Status
-
-LedgerQ is feature-complete and suitable for:
-- Event sourcing applications
-- Audit logging
-- Local message buffering
-- Development and testing
-- Learning about message queue internals
-
-**Not Recommended For**:
-- High-throughput distributed systems (use Kafka, NATS, etc.)
-- Multi-node scenarios (single-node only)
-- Consumer groups or multiple independent consumers
-
-## Use Cases
-
-- **Offline task queue**: Buffer background jobs locally
-- **Telemetry/event buffer**: Persist analytics offline
-- **Local event sourcing**: Log domain events with replay
-- **Edge/IoT queue**: Message persistence in constrained environments
-- **Job replay testing**: Reproduce job batches deterministically
-
-## Contributing
-
-This is an educational project. Feel free to fork, experiment, and learn!
-
 ## License
 
-Apache License 2.0 - see LICENSE file for details.
+Apache License 2.0 - see [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
@@ -558,6 +228,11 @@ Inspired by:
 - Apache Kafka's log-structured storage
 - NATS Streaming's message persistence
 - Python's [persist-queue](https://github.com/peter-wangxu/persist-queue)
-- Various academic papers on log-structured systems
 
 Built as a learning project to understand message queue internals and Go systems programming.
+
+## Project Status
+
+**v1.0.0** - Feature-complete and production-ready for single-node use cases.
+
+See [CHANGELOG.md](CHANGELOG.md) for version history and [SECURITY.md](SECURITY.md) for security policy.
