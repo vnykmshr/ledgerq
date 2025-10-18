@@ -33,7 +33,8 @@ func main() {
 	}
 	defer q.Close()
 
-	fmt.Println("=== LedgerQ Metrics Example ===\n")
+	fmt.Println("=== LedgerQ Metrics Example ===")
+	fmt.Println()
 
 	// Perform various operations
 	fmt.Println("Enqueueing 10 individual messages...")
@@ -85,7 +86,9 @@ func main() {
 	snapshot := ledgerq.GetMetricsSnapshot(collector)
 
 	// Display metrics
-	fmt.Println("\n=== Metrics Snapshot ===\n")
+	fmt.Println()
+	fmt.Println("=== Metrics Snapshot ===")
+	fmt.Println()
 
 	fmt.Printf("Queue Name: %s\n\n", snapshot.QueueName)
 
@@ -133,5 +136,6 @@ func main() {
 		fmt.Printf("  Last Compaction:   %v\n", lastCompaction)
 	}
 
-	fmt.Println("\n=== Example Complete ===")
+	fmt.Println()
+	fmt.Println("=== Example Complete ===")
 }

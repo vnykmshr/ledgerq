@@ -19,7 +19,8 @@ func main() {
 	}
 	defer q.Close()
 
-	fmt.Println("=== LedgerQ Headers (Metadata) Example ===\n")
+	fmt.Println("=== LedgerQ Headers (Metadata) Example ===")
+	fmt.Println()
 
 	// Example 1: Basic headers for routing
 	fmt.Println("1. Message routing with headers:")
@@ -181,7 +182,8 @@ func main() {
 		fmt.Printf("     Step %s: %s\n", wf.step, wf.headers["step-name"])
 	}
 
-	fmt.Println("\n   Processing workflow:")
+	fmt.Println()
+	fmt.Println("   Processing workflow:")
 	for i := 0; i < len(workflows); i++ {
 		msg, err := q.Dequeue()
 		if err != nil {
@@ -225,7 +227,8 @@ func main() {
 		fmt.Printf("     [%s/%s] %s\n", m.msgType, m.region, m.payload)
 	}
 
-	fmt.Println("\n   Filtering messages (only 'audit' type):")
+	fmt.Println()
+	fmt.Println("   Filtering messages (only 'audit' type):")
 	for i := 0; i < len(messages); i++ {
 		msg, err := q.Dequeue()
 		if err != nil {
@@ -291,8 +294,10 @@ func main() {
 	fmt.Printf("   Pending messages: %d\n", stats.PendingMessages)
 	fmt.Printf("   Segments: %d\n", stats.SegmentCount)
 
-	fmt.Println("\n=== Headers Example Complete ===")
-	fmt.Println("\nKey Takeaways:")
+	fmt.Println()
+	fmt.Println("=== Headers Example Complete ===")
+	fmt.Println()
+	fmt.Println("Key Takeaways:")
 	fmt.Println("  • Headers enable message routing and classification")
 	fmt.Println("  • Use headers for distributed tracing (trace-id, span-id)")
 	fmt.Println("  • Headers support workflow orchestration")

@@ -19,7 +19,8 @@ func main() {
 	}
 	defer q.Close()
 
-	fmt.Println("=== LedgerQ TTL (Time-To-Live) Example ===\n")
+	fmt.Println("=== LedgerQ TTL (Time-To-Live) Example ===")
+	fmt.Println()
 
 	// Example 1: Enqueue messages with different TTLs
 	fmt.Println("1. Enqueuing messages with TTL:")
@@ -158,5 +159,6 @@ func main() {
 	fmt.Printf("   Next message ID: %d\n", stats.NextMessageID)
 	fmt.Printf("   Read message ID: %d\n", stats.ReadMessageID)
 
-	fmt.Println("\n=== TTL Example Complete ===")
+	fmt.Println()
+	fmt.Println("=== TTL Example Complete ===")
 }

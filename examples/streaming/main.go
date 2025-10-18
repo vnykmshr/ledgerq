@@ -35,7 +35,8 @@ func main() {
 	defer q.Close()
 
 	fmt.Println("=== LedgerQ Streaming Example ===")
-	fmt.Println("Press Ctrl+C to stop\n")
+	fmt.Println("Press Ctrl+C to stop")
+	fmt.Println()
 
 	// Create context that responds to interrupt signals
 	ctx, cancel := context.WithCancel(context.Background())
@@ -69,7 +70,8 @@ func main() {
 	// Wait for both to complete
 	wg.Wait()
 
-	fmt.Println("\n=== Streaming Example Complete ===")
+	fmt.Println()
+	fmt.Println("=== Streaming Example Complete ===")
 }
 
 // runConsumer streams messages from the queue in real-time
