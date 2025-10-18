@@ -35,6 +35,10 @@ import (
 	"github.com/vnykmshr/ledgerq/internal/segment"
 )
 
+// Version is the current version of LedgerQ.
+// This is the single source of truth for the application version.
+const Version = "1.0.0"
+
 // Queue represents a persistent message queue.
 type Queue struct {
 	q *queue.Queue

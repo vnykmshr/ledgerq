@@ -11,8 +11,6 @@ import (
 	"github.com/vnykmshr/ledgerq/pkg/ledgerq"
 )
 
-const version = "1.0.0"
-
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
@@ -31,7 +29,7 @@ func main() {
 	case "peek":
 		handlePeek()
 	case "version":
-		fmt.Printf("ledgerq version %s\n", version)
+		fmt.Printf("ledgerq version %s\n", ledgerq.Version)
 	case "help", "-h", "--help":
 		printUsage()
 	default:
