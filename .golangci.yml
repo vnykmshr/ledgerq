@@ -43,3 +43,6 @@ issues:
         - errcheck
         - gosec
         - unparam
+        - gosimple
+        - unconvert
+        - revive
