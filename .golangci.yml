@@ -21,9 +21,6 @@ linters-settings:
     min-complexity: 20
   revive:
     rules:
-      - name: exported
-        severity: warning
-        disabled: false
       - name: package-comments
         severity: warning
         disabled: false
