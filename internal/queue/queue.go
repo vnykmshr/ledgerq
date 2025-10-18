@@ -386,10 +386,10 @@ func (q *Queue) EnqueueWithHeaders(payload []byte, headers map[string]string) (u
 
 	msgID := q.nextMsgID
 
-	// Create entry with headers
+	// Create entry with headers (flag will be set by Marshal if headers present)
 	entry := &format.Entry{
 		Type:      format.EntryTypeData,
-		Flags:     format.EntryFlagHeaders,
+		Flags:     format.EntryFlagNone,
 		MsgID:     msgID,
 		Timestamp: time.Now().UnixNano(),
 		Headers:   headers,
@@ -457,10 +457,10 @@ func (q *Queue) EnqueueWithOptions(payload []byte, ttl time.Duration, headers ma
 	msgID := q.nextMsgID
 	now := time.Now().UnixNano()
 
-	// Create entry with both TTL and headers
+	// Create entry with both TTL and headers (flags will be set by Marshal)
 	entry := &format.Entry{
 		Type:      format.EntryTypeData,
-		Flags:     format.EntryFlagTTL | format.EntryFlagHeaders,
+		Flags:     format.EntryFlagNone,
 		MsgID:     msgID,
 		Timestamp: now,
 		ExpiresAt: now + ttl.Nanoseconds(),
