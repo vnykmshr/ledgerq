@@ -1,4 +1,4 @@
-.PHONY: help test build lint fmt bench clean coverage install mod-tidy audit all
+.PHONY: help test build lint fmt bench clean coverage install install-tools mod-tidy audit all
 
 # Colors for output
 GREEN  := $(shell tput -Txterm setaf 2)
@@ -55,6 +55,19 @@ clean: ## Clean build artifacts and test outputs
 install: ## Install the CLI binary
 	@echo "$(GREEN)Installing $(BINARY_NAME)...$(RESET)"
 	go install $(CMD_DIR)
+
+install-tools: ## Install development and security tools
+	@echo "$(GREEN)Installing development tools...$(RESET)"
+	@echo "$(YELLOW)Installing goimports...$(RESET)"
+	go install golang.org/x/tools/cmd/goimports@latest
+	@echo "$(YELLOW)Installing govulncheck...$(RESET)"
+	go install golang.org/x/vuln/cmd/govulncheck@latest
+	@echo "$(YELLOW)Installing staticcheck...$(RESET)"
+	go install honnef.co/go/tools/cmd/staticcheck@latest
+	@echo "$(YELLOW)Installing gosec...$(RESET)"
+	go install github.com/securego/gosec/v2/cmd/gosec@latest
+	@echo "$(GREEN)✓ All tools installed successfully$(RESET)"
+	@echo "$(YELLOW)Note: golangci-lint should be installed separately from https://golangci-lint.run/usage/install/$(RESET)"
 
 mod-tidy: ## Tidy Go modules
 	@echo "$(GREEN)Tidying Go modules...$(RESET)"

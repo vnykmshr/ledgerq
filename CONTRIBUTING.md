@@ -41,7 +41,6 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 
 - Go 1.21 or later
 - golangci-lint (install from https://golangci-lint.run/usage/install/)
-- goimports (optional): `go install golang.org/x/tools/cmd/goimports@latest`
 
 ### Getting Started
 
@@ -52,6 +51,9 @@ cd ledgerq
 
 # Download dependencies
 go mod download
+
+# Install development and security tools
+make install-tools
 
 # Run tests
 make test

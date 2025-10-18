@@ -290,9 +290,15 @@ This runs:
 
 **Install required tools:**
 ```bash
+make install-tools
+```
+
+Or manually:
+```bash
 go install golang.org/x/vuln/cmd/govulncheck@latest
 go install honnef.co/go/tools/cmd/staticcheck@latest
 go install github.com/securego/gosec/v2/cmd/gosec@latest
+go install golang.org/x/tools/cmd/goimports@latest
 ```
 
 **Expected output:**
