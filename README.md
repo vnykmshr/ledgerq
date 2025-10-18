@@ -12,6 +12,7 @@ Go developers often need a simple, reliable queue for embedded or local-first ap
 - **Crash-safe durability** with append-only log design
 - **Batch operations** for high throughput
 - **Streaming API** for real-time event processing
+- **Message TTL** for automatic expiration
 - **Replay capability** from message ID or timestamp
 - **Auto-compaction** with retention policies
 - **Thread-safe** concurrent access
@@ -27,6 +28,7 @@ Go developers often need a simple, reliable queue for embedded or local-first ap
 - ✅ **Automatic Segment Rotation** — Configurable by size, count, time, or both
 - ✅ **Batch Operations** — Efficient EnqueueBatch/DequeueBatch with single fsync
 - ✅ **Streaming API** — Real-time push-based message delivery with context support
+- ✅ **Message TTL** — Automatic expiration with lazy evaluation during dequeue
 - ✅ **Replay Capabilities** — Seek by message ID or timestamp
 - ✅ **Compaction & Retention** — Automatic background or manual cleanup
 - ✅ **Thread-Safe** — Safe for concurrent producers and consumers
@@ -122,6 +124,39 @@ fmt.Printf("ID: %d, Payload: %s\n", msg.ID, msg.Payload)
 // Batch
 messages, err := q.DequeueBatch(10) // Read up to 10 messages
 ```
+
+#### Message TTL (Time-To-Live)
+
+```go
+import "time"
+
+// Enqueue message that expires after 5 seconds
+offset, err := q.EnqueueWithTTL([]byte("temporary message"), 5*time.Second)
+
+// Dequeue automatically skips expired messages
+msg, err := q.Dequeue()  // Will skip expired messages
+
+// Check if message has TTL
+if msg.ExpiresAt > 0 {
+    expiresIn := time.Until(time.Unix(0, msg.ExpiresAt))
+    fmt.Printf("Message expires in: %v\n", expiresIn)
+}
+```
+
+**TTL Features:**
+- Messages expire automatically after specified duration
+- Expired messages skipped during dequeue (lazy expiration)
+- Works with both single and batch dequeue operations
+- TTL is persisted across queue restarts
+- Mix TTL and non-TTL messages in same queue
+- Zero overhead for non-TTL messages
+
+**Use Cases:**
+- Temporary task queues with expiration
+- Time-sensitive notifications
+- Cache invalidation messages
+- Session management events
+- Rate limiting with time windows
 
 #### Streaming Messages
 
@@ -341,6 +376,7 @@ See the [examples](examples/) directory for complete, runnable examples:
 - **[simple](examples/simple)**: Basic queue operations
 - **[producer-consumer](examples/producer-consumer)**: Multi-producer, multi-consumer pattern
 - **[streaming](examples/streaming)**: Real-time streaming with context cancellation
+- **[ttl](examples/ttl)**: Message expiration with TTL
 - **[replay](examples/replay)**: Replay and seeking capabilities
 - **[metrics](examples/metrics)**: Metrics collection and monitoring
 
@@ -349,6 +385,7 @@ Run any example:
 go run examples/simple/main.go
 go run examples/producer-consumer/main.go
 go run examples/streaming/main.go
+go run examples/ttl/main.go
 go run examples/replay/main.go
 go run examples/metrics/main.go
 ```
@@ -363,8 +400,9 @@ LedgerQ uses a log-structured design with segment-based storage:
 **Naming**: Zero-padded base offsets like `00000000000000001000.log`
 **Rotation**: Automatic based on size, count, or time policies
 
-**Entry Format** (26 bytes + payload):
-- Type (1B) + Flags (1B) + Length (4B) + Message ID (8B) + Timestamp (8B) + Payload (variable) + CRC32 (4B)
+**Entry Format** (26-34 bytes + payload):
+- Length (4B) + Type (1B) + Flags (1B) + Message ID (8B) + Timestamp (8B) + [ExpiresAt (8B, optional)] + Payload (variable) + CRC32 (4B)
+- ExpiresAt field only present when TTL flag is set
 
 **Index Format** (sparse, every 4KB):
 - Message ID (8B) + Timestamp (8B) + File Offset (8B)
