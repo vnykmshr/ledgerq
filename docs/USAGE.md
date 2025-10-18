@@ -1,6 +1,6 @@
 # LedgerQ Usage Guide
 
-Comprehensive guide to using LedgerQ in your applications.
+Complete reference for using LedgerQ.
 
 ## Table of Contents
 
@@ -71,7 +71,7 @@ if err != nil {
 }
 ```
 
-**Performance tip**: Batching provides 10-100x performance improvement with a single fsync.
+Batching provides 10-100x performance improvement with a single fsync.
 
 ### Dequeuing Messages
 
@@ -98,8 +98,6 @@ for _, msg := range messages {
 ```
 
 ### Closing the Queue
-
-Always close the queue to ensure data is flushed:
 
 ```go
 if err := q.Close(); err != nil {
@@ -284,7 +282,7 @@ fmt.Printf("Segments:         %d\n", stats.SegmentCount)
 
 ### Metrics Collection
 
-Collect detailed performance metrics:
+Collect performance metrics:
 
 ```go
 // Create collector

@@ -1,10 +1,10 @@
 # LedgerQ Architecture
 
-This document describes the internal architecture and design decisions behind LedgerQ.
+Internal architecture and design decisions.
 
 ## Storage Format
 
-LedgerQ uses a log-structured design with segment-based storage for efficient message persistence.
+Log-structured design with segment-based storage.
 
 ### Segment Files
 
@@ -43,7 +43,7 @@ Each entry consists of:
 
 ### Index Format
 
-Sparse indexes are created alongside segment files for fast lookups:
+Sparse indexes alongside segment files:
 
 ```
 ┌────────────────┬────────────┬───────────┬────────────┐
@@ -253,9 +253,9 @@ Format
 LedgerQ provides safe concurrent access with these guarantees:
 
 **Queue Level**:
-- Multiple concurrent enqueuers: ✅ Safe
-- Multiple concurrent dequeuers: ✅ Safe (same read position)
-- Mixed enqueue/dequeue: ✅ Safe
+- Multiple concurrent enqueuers: Safe
+- Multiple concurrent dequeuers: Safe (same read position)
+- Mixed enqueue/dequeue: Safe
 
 **Implementation**:
 - `sync.RWMutex` for queue state
@@ -302,8 +302,8 @@ LedgerQ provides safe concurrent access with these guarantees:
 ### Scalability
 
 **Concurrent Writers** (8 goroutines):
-- Enqueue: ~350 ns/op (maintains performance)
-- Batch: ~2.2 μs/op (excellent scalability)
+- Enqueue: ~350 ns/op
+- Batch: ~2.2 μs/op
 
 **Bottlenecks**:
 - Single read position (dequeue serialization)
