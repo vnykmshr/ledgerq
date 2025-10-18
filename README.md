@@ -13,6 +13,7 @@ Go developers often need a simple, reliable queue for embedded or local-first ap
 - **Batch operations** for high throughput
 - **Streaming API** for real-time event processing
 - **Message TTL** for automatic expiration
+- **Message headers** for metadata and routing
 - **Replay capability** from message ID or timestamp
 - **Auto-compaction** with retention policies
 - **Thread-safe** concurrent access
@@ -29,6 +30,7 @@ Go developers often need a simple, reliable queue for embedded or local-first ap
 - ✅ **Batch Operations** — Efficient EnqueueBatch/DequeueBatch with single fsync
 - ✅ **Streaming API** — Real-time push-based message delivery with context support
 - ✅ **Message TTL** — Automatic expiration with lazy evaluation during dequeue
+- ✅ **Message Headers** — Key-value metadata for routing, tracing, and classification
 - ✅ **Replay Capabilities** — Seek by message ID or timestamp
 - ✅ **Compaction & Retention** — Automatic background or manual cleanup
 - ✅ **Thread-Safe** — Safe for concurrent producers and consumers
@@ -157,6 +159,43 @@ if msg.ExpiresAt > 0 {
 - Cache invalidation messages
 - Session management events
 - Rate limiting with time windows
+
+#### Message Headers (Metadata)
+
+```go
+// Enqueue message with key-value metadata
+headers := map[string]string{
+    "content-type":   "application/json",
+    "correlation-id": "12345",
+    "priority":       "high",
+    "source":         "service-a",
+}
+offset, err := q.EnqueueWithHeaders(payload, headers)
+
+// Dequeue returns message with headers
+msg, err := q.Dequeue()
+fmt.Printf("Type: %s\n", msg.Headers["content-type"])
+fmt.Printf("Priority: %s\n", msg.Headers["priority"])
+
+// Combine TTL and headers
+offset, err := q.EnqueueWithOptions(payload, 5*time.Second, headers)
+```
+
+**Headers Features:**
+- Key-value metadata stored with each message
+- Headers persist across queue restarts
+- Works with both single and batch dequeue operations
+- Combine with TTL for classified temporary messages
+- Zero overhead for messages without headers
+
+**Use Cases:**
+- Message routing and classification
+- Distributed tracing (trace-id, span-id, correlation-id)
+- Event sourcing metadata (aggregate-id, event-type, version)
+- Workflow orchestration (step tracking, retry counts)
+- Content-type indication
+- Message schema versioning
+- Priority and SLA management
 
 #### Streaming Messages
 
@@ -377,6 +416,7 @@ See the [examples](examples/) directory for complete, runnable examples:
 - **[producer-consumer](examples/producer-consumer)**: Multi-producer, multi-consumer pattern
 - **[streaming](examples/streaming)**: Real-time streaming with context cancellation
 - **[ttl](examples/ttl)**: Message expiration with TTL
+- **[headers](examples/headers)**: Message metadata and headers
 - **[replay](examples/replay)**: Replay and seeking capabilities
 - **[metrics](examples/metrics)**: Metrics collection and monitoring
 
@@ -386,6 +426,7 @@ go run examples/simple/main.go
 go run examples/producer-consumer/main.go
 go run examples/streaming/main.go
 go run examples/ttl/main.go
+go run examples/headers/main.go
 go run examples/replay/main.go
 go run examples/metrics/main.go
 ```
@@ -400,9 +441,10 @@ LedgerQ uses a log-structured design with segment-based storage:
 **Naming**: Zero-padded base offsets like `00000000000000001000.log`
 **Rotation**: Automatic based on size, count, or time policies
 
-**Entry Format** (26-34 bytes + payload):
-- Length (4B) + Type (1B) + Flags (1B) + Message ID (8B) + Timestamp (8B) + [ExpiresAt (8B, optional)] + Payload (variable) + CRC32 (4B)
+**Entry Format** (26-34+ bytes + payload):
+- Length (4B) + Type (1B) + Flags (1B) + Message ID (8B) + Timestamp (8B) + [ExpiresAt (8B, optional)] + [Headers (variable, optional)] + Payload (variable) + CRC32 (4B)
 - ExpiresAt field only present when TTL flag is set
+- Headers field only present when Headers flag is set (format: NumHeaders:2 + [KeyLen:2 + Key:N + ValueLen:2 + Value:N]...)
 
 **Index Format** (sparse, every 4KB):
 - Message ID (8B) + Timestamp (8B) + File Offset (8B)
