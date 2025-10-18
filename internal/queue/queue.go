@@ -81,8 +81,8 @@ func DefaultOptions(dir string) *Options {
 		SegmentOptions:     segment.DefaultManagerOptions(dir),
 		AutoSync:           false,
 		SyncInterval:       1 * time.Second,
-		CompactionInterval: 0,                  // Disabled by default
-		Logger:             logging.NoopLogger{}, // No logging by default
+		CompactionInterval: 0,                       // Disabled by default
+		Logger:             logging.NoopLogger{},    // No logging by default
 		MetricsCollector:   metrics.NoopCollector{}, // No metrics by default
 	}
 }

@@ -62,13 +62,13 @@ type Writer struct {
 	index  *format.Index
 
 	// Tracking
-	nextOffset       uint64 // Next file offset to write
-	lastIndexOffset  uint64 // Last offset where we added an index entry
-	bytesWritten     uint64 // Total bytes written to segment
-	messagesWritten  uint64 // Total messages written
-	minMsgID         uint64 // Smallest message ID written
-	maxMsgID         uint64 // Largest message ID written
-	firstWrite       bool   // Track if we've written anything
+	nextOffset      uint64 // Next file offset to write
+	lastIndexOffset uint64 // Last offset where we added an index entry
+	bytesWritten    uint64 // Total bytes written to segment
+	messagesWritten uint64 // Total messages written
+	minMsgID        uint64 // Smallest message ID written
+	maxMsgID        uint64 // Largest message ID written
+	firstWrite      bool   // Track if we've written anything
 
 	opts *WriterOptions
 

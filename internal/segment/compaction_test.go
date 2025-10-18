@@ -12,7 +12,7 @@ func TestCompact_NoRetentionPolicy(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	opts := DefaultManagerOptions(tmpDir)
-	opts.RetentionPolicy = nil // Disable retention
+	opts.RetentionPolicy = nil  // Disable retention
 	opts.MaxSegmentMessages = 5 // Small segments for testing
 
 	mgr, err := NewManager(opts)

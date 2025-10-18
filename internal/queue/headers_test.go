@@ -16,9 +16,9 @@ func TestEnqueueWithHeaders(t *testing.T) {
 
 	// Enqueue with headers
 	headers := map[string]string{
-		"content-type":  "application/json",
+		"content-type":   "application/json",
 		"correlation-id": "12345",
-		"priority":      "high",
+		"priority":       "high",
 	}
 	payload := []byte("test message with headers")
 	offset, err := q.EnqueueWithHeaders(payload, headers)

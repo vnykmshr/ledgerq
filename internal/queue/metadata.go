@@ -22,13 +22,13 @@ const (
 
 // Metadata stores queue state for persistence
 type Metadata struct {
-	Version    uint32 // Format version
-	NextMsgID  uint64 // Next message ID to assign
-	ReadMsgID  uint64 // Next message ID to read
-	mu         sync.RWMutex
-	path       string
-	file       *os.File
-	autoSync   bool
+	Version   uint32 // Format version
+	NextMsgID uint64 // Next message ID to assign
+	ReadMsgID uint64 // Next message ID to read
+	mu        sync.RWMutex
+	path      string
+	file      *os.File
+	autoSync  bool
 }
 
 // OpenMetadata opens or creates a metadata file

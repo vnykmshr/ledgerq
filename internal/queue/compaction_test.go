@@ -14,7 +14,7 @@ func TestAutoCompaction(t *testing.T) {
 
 	opts := DefaultOptions(tmpDir)
 	opts.Logger = logging.NewDefaultLogger(logging.LevelDebug)
-	opts.CompactionInterval = 10 * time.Second // Long interval - we'll trigger manually after setup
+	opts.CompactionInterval = 10 * time.Second  // Long interval - we'll trigger manually after setup
 	opts.SegmentOptions.MaxSegmentMessages = 10 // Small segments
 	opts.SegmentOptions.RotationPolicy = segment.RotateByCount
 	opts.SegmentOptions.RetentionPolicy = &segment.RetentionPolicy{

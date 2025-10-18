@@ -106,12 +106,12 @@ func TestWithOptions(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	opts := &ledgerq.Options{
-		AutoSync:               true,
-		SyncInterval:           1 * time.Second,
-		CompactionInterval:     0, // Disabled
-		MaxSegmentSize:         1024 * 1024,
-		MaxSegmentMessages:     100,
-		RotationPolicy:         ledgerq.RotateByBoth,
+		AutoSync:           true,
+		SyncInterval:       1 * time.Second,
+		CompactionInterval: 0, // Disabled
+		MaxSegmentSize:     1024 * 1024,
+		MaxSegmentMessages: 100,
+		RotationPolicy:     ledgerq.RotateByBoth,
 		RetentionPolicy: &ledgerq.RetentionPolicy{
 			MaxAge:      24 * time.Hour,
 			MaxSize:     10 * 1024 * 1024,

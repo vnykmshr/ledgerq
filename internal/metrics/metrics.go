@@ -328,16 +328,16 @@ func (h *durationHistogram) percentile(p float64) time.Duration {
 // Useful when metrics are disabled.
 type NoopCollector struct{}
 
-func (n NoopCollector) RecordEnqueue(payloadSize int, duration time.Duration)                       {}
-func (n NoopCollector) RecordDequeue(payloadSize int, duration time.Duration)                       {}
-func (n NoopCollector) RecordEnqueueBatch(count, totalPayloadSize int, duration time.Duration)      {}
-func (n NoopCollector) RecordDequeueBatch(count, totalPayloadSize int, duration time.Duration)      {}
-func (n NoopCollector) RecordEnqueueError()                                                          {}
-func (n NoopCollector) RecordDequeueError()                                                          {}
-func (n NoopCollector) RecordSeek()                                                                  {}
+func (n NoopCollector) RecordEnqueue(payloadSize int, duration time.Duration)                  {}
+func (n NoopCollector) RecordDequeue(payloadSize int, duration time.Duration)                  {}
+func (n NoopCollector) RecordEnqueueBatch(count, totalPayloadSize int, duration time.Duration) {}
+func (n NoopCollector) RecordDequeueBatch(count, totalPayloadSize int, duration time.Duration) {}
+func (n NoopCollector) RecordEnqueueError()                                                    {}
+func (n NoopCollector) RecordDequeueError()                                                    {}
+func (n NoopCollector) RecordSeek()                                                            {}
 func (n NoopCollector) RecordCompaction(segmentsRemoved int, bytesFreed int64, duration time.Duration) {
 }
-func (n NoopCollector) RecordCompactionError()                                            {}
-func (n NoopCollector) UpdateQueueState(pending, segments, nextMsgID, readMsgID uint64)  {}
-func (n NoopCollector) GetSnapshot() *Snapshot                                            { return nil }
-func (n NoopCollector) Reset()                                                            {}
+func (n NoopCollector) RecordCompactionError()                                          {}
+func (n NoopCollector) UpdateQueueState(pending, segments, nextMsgID, readMsgID uint64) {}
+func (n NoopCollector) GetSnapshot() *Snapshot                                          { return nil }
+func (n NoopCollector) Reset()                                                          {}

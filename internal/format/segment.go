@@ -29,14 +29,16 @@ const (
 
 // SegmentHeaderSize is the fixed size of the segment header (64 bytes - cache-line aligned)
 // Layout: Magic(4) + Version(2) + Flags(2) + BaseOffset(8) + CreatedAt(8) +
-//         MinMsgID(8) + MaxMsgID(8) + Reserved(20) + HeaderCRC(4) = 64 bytes
+//
+//	MinMsgID(8) + MaxMsgID(8) + Reserved(20) + HeaderCRC(4) = 64 bytes
 const SegmentHeaderSize = 64
 
 // SegmentHeader represents the header of a segment file.
 //
 // Binary format (little-endian, 64 bytes):
-//   [Magic:4][Version:2][Flags:2][BaseOffset:8][CreatedAt:8]
-//   [MinMsgID:8][MaxMsgID:8][Reserved:20][HeaderCRC:4]
+//
+//	[Magic:4][Version:2][Flags:2][BaseOffset:8][CreatedAt:8]
+//	[MinMsgID:8][MaxMsgID:8][Reserved:20][HeaderCRC:4]
 type SegmentHeader struct {
 	// Magic is the file format identifier (0x4C445151 for segments)
 	Magic uint32

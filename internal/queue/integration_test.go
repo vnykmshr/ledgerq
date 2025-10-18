@@ -422,11 +422,11 @@ func TestIntegration_LargeMessages(t *testing.T) {
 
 	// Test various payload sizes
 	sizes := []int{
-		1,              // 1 byte
-		1024,           // 1 KB
-		64 * 1024,      // 64 KB
-		512 * 1024,     // 512 KB
-		1024 * 1024,    // 1 MB
+		1,               // 1 byte
+		1024,            // 1 KB
+		64 * 1024,       // 64 KB
+		512 * 1024,      // 512 KB
+		1024 * 1024,     // 1 MB
 		5 * 1024 * 1024, // 5 MB
 	}
 

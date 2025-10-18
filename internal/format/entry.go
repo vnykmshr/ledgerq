@@ -29,14 +29,16 @@ const EntryHeaderSize = 22
 // Entry represents a single message entry in a segment file.
 //
 // Binary format (little-endian):
-//   [Length:4][Type:1][Flags:1][MsgID:8][Timestamp:8][ExpiresAt:8?][HeadersSize:2?][Headers:N?][Payload:N][CRC32C:4]
+//
+//	[Length:4][Type:1][Flags:1][MsgID:8][Timestamp:8][ExpiresAt:8?][HeadersSize:2?][Headers:N?][Payload:N][CRC32C:4]
 //
 // Optional fields (included based on flags):
 //   - ExpiresAt (8 bytes): Present if EntryFlagTTL is set
 //   - HeadersSize (2 bytes) + Headers (N bytes): Present if EntryFlagHeaders is set
 //
 // Headers encoding:
-//   [NumHeaders:2][Key1Len:2][Key1:N][Value1Len:2][Value1:N]...[KeyNLen:2][KeyN:N][ValueNLen:2][ValueN:N]
+//
+//	[NumHeaders:2][Key1Len:2][Key1:N][Value1Len:2][Value1:N]...[KeyNLen:2][KeyN:N][ValueNLen:2][ValueN:N]
 //
 // Total header size: 22 bytes (base) + 8 (TTL) + 2+N (Headers)
 type Entry struct {
@@ -267,7 +269,7 @@ func Unmarshal(r io.Reader) (*Entry, error) {
 		if len(buf) < 30+4 { // Min size with TTL
 			return nil, fmt.Errorf("entry has TTL flag but insufficient data")
 		}
-		entry.ExpiresAt = int64(binary.LittleEndian.Uint64(buf[offset:offset+8])) //nolint:gosec // G115: Safe int64 conversion
+		entry.ExpiresAt = int64(binary.LittleEndian.Uint64(buf[offset : offset+8])) //nolint:gosec // G115: Safe int64 conversion
 		offset += 8
 	}
 

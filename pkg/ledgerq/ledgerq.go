@@ -211,9 +211,9 @@ func DefaultOptions(dir string) *Options {
 	return &Options{
 		AutoSync:           false,
 		SyncInterval:       1 * time.Second,
-		CompactionInterval: 0, // Disabled by default
+		CompactionInterval: 0,                  // Disabled by default
 		MaxSegmentSize:     1024 * 1024 * 1024, // 1GB
-		MaxSegmentMessages: 0, // Unlimited
+		MaxSegmentMessages: 0,                  // Unlimited
 		RotationPolicy:     RotateBySize,
 		RetentionPolicy:    nil, // No retention
 		Logger:             nil, // No logging

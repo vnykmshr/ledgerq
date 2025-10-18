@@ -10,6 +10,10 @@ Complete reference for using LedgerQ.
 - [Advanced Features](#advanced-features)
 - [CLI Tool](#cli-tool)
 - [Best Practices](#best-practices)
+  - [Performance](#performance)
+  - [Reliability](#reliability)
+  - [Development](#development)
+  - [Security](#security)
 - [Troubleshooting](#troubleshooting)
 
 ## Installation
@@ -450,6 +454,34 @@ ledgerq version
 3. **Enable logging during development**
    - Debug issues more easily
    - Disable in production for performance
+
+### Security
+
+1. **File permissions**
+   - Queue data files are created with 0644 permissions (user rw, group/other read)
+   - Segment files (.log) and index files (.idx) are world-readable by default
+   - Metadata files use the same 0644 permissions
+
+2. **Protecting sensitive data**
+   - Place queue directories in protected locations with restrictive parent directory permissions
+   - Use OS-level access controls (e.g., 0700 on parent directory)
+   - Consider application-level encryption for sensitive payloads before enqueuing
+   - Queue directories should not be placed in web-accessible locations
+
+3. **Example: Secure queue location**
+   ```go
+   // Create queue in user-only directory
+   queueDir := "/var/app/queues/sensitive"
+   if err := os.MkdirAll(queueDir, 0700); err != nil {
+       log.Fatal(err)
+   }
+   q, err := ledgerq.Open(queueDir, nil)
+   ```
+
+4. **Multi-user systems**
+   - Queue data is readable by other users with file system access
+   - Use appropriate user/group permissions on queue directories
+   - Consider dedicated service accounts for queue operations
 
 ## Troubleshooting
 

@@ -19,7 +19,8 @@ const DefaultIndexInterval = 4096
 // IndexHeader represents the header of an index file.
 //
 // Binary format (little-endian, 32 bytes):
-//   [Magic:4][Version:2][_:2][BaseID:8][EntryCount:8][Reserved:4][HeaderCRC:4]
+//
+//	[Magic:4][Version:2][_:2][BaseID:8][EntryCount:8][Reserved:4][HeaderCRC:4]
 type IndexHeader struct {
 	// Magic is the file format identifier (0x4C445149 for indexes)
 	Magic uint32
@@ -46,7 +47,8 @@ type IndexHeader struct {
 // IndexEntry represents a single entry in the sparse index.
 //
 // Binary format (little-endian, 24 bytes):
-//   [MessageID:8][FileOffset:8][Timestamp:8]
+//
+//	[MessageID:8][FileOffset:8][Timestamp:8]
 type IndexEntry struct {
 	// MessageID is the message identifier
 	MessageID uint64
