@@ -93,7 +93,9 @@ func handleStats() {
 		fmt.Fprintf(w, "Consumed:\t%.1f%%\n", consumedPct)
 	}
 
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: output formatting failed: %v\n", err)
+	}
 }
 
 func handleInspect() {
@@ -166,7 +168,9 @@ func handleCompact() {
 	fmt.Fprintln(w, "=================")
 	fmt.Fprintf(w, "Segments Removed:\t%d\n", result.SegmentsRemoved)
 	fmt.Fprintf(w, "Bytes Freed:\t%d (%.2f MB)\n", result.BytesFreed, float64(result.BytesFreed)/1024/1024)
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: output formatting failed: %v\n", err)
+	}
 
 	if result.SegmentsRemoved == 0 {
 		fmt.Println("\nNo segments were eligible for removal.")
