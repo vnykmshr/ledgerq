@@ -389,8 +389,10 @@ func TestMetadataFile_ConcurrentWrites(t *testing.T) {
 
 	mf := NewMetadataFile(path)
 
-	// Write initial metadata
+	// Write initial metadata with non-zero value
 	initial := NewQueueMetadata()
+	initial.WriteOffset = 1
+	initial.MessageCount = 1
 	if err := mf.Write(initial); err != nil {
 		t.Fatalf("Write() initial error = %v", err)
 	}
@@ -406,7 +408,7 @@ func TestMetadataFile_ConcurrentWrites(t *testing.T) {
 				t.Errorf("Write() error = %v", err)
 			}
 			done <- true
-		}(uint64(i * 100)) //nolint:gosec // G115: Test code, safe conversion
+		}(uint64((i+1) * 100)) //nolint:gosec // G115: Test code, safe conversion
 	}
 
 	// Wait for all writes
@@ -420,9 +422,15 @@ func TestMetadataFile_ConcurrentWrites(t *testing.T) {
 		t.Fatalf("Read() after concurrent writes error = %v", err)
 	}
 
-	// Should have some offset written
-	if final.WriteOffset == 0 {
-		t.Error("WriteOffset should be non-zero after concurrent writes")
+	// WriteOffset should be one of the written values (initial=1 or 100-1000)
+	// Due to concurrent writes, we can't predict which one wins,
+	// but it should be a valid value
+	validOffsets := map[uint64]bool{1: true}
+	for i := 1; i <= 10; i++ {
+		validOffsets[uint64(i*100)] = true
+	}
+	if !validOffsets[final.WriteOffset] {
+		t.Errorf("WriteOffset = %d, want one of %v", final.WriteOffset, validOffsets)
 	}
 }
 
