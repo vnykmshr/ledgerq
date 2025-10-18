@@ -74,8 +74,6 @@ jobs:
         with:
           version: v1.64.8
           args: --timeout=10m
-          skip-build-cache: true
-          skip-pkg-cache: true
 
   build:
     name: Build
