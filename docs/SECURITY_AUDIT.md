@@ -273,6 +273,51 @@ FIX (optional) - Clean up for code consistency
 - **No encryption** - Users responsible for payload encryption if needed
 - **GDPR/Privacy** - N/A (storage only, no data interpretation)
 
+## Running Security Audits
+
+A `make audit` target is provided for periodic security checks:
+
+```bash
+make audit
+```
+
+This runs:
+1. **govulncheck** - Go vulnerability database scanner
+2. **go vet** - Official Go static analyzer
+3. **staticcheck** - Advanced linting
+4. **gosec** - Security scanner (G304/G302 excluded, see above)
+5. **go test -race** - Race condition detection
+
+**Install required tools:**
+```bash
+go install golang.org/x/vuln/cmd/govulncheck@latest
+go install honnef.co/go/tools/cmd/staticcheck@latest
+go install github.com/securego/gosec/v2/cmd/gosec@latest
+```
+
+**Expected output:**
+```
+Running security audit...
+
+[1/5] Checking for vulnerabilities (govulncheck)...
+  ✓ No vulnerabilities found
+
+[2/5] Running go vet...
+  ✓ Passed
+
+[3/5] Running staticcheck...
+  ⚠ Style issues in test files (non-critical)
+
+[4/5] Running gosec security scanner...
+  ✓ No critical security issues
+    Note: G304 (path traversal) and G302 (file permissions) excluded
+
+[5/5] Running tests with race detector...
+  ✓ All tests passed
+
+✓ Security audit completed
+```
+
 ## Conclusion
 
 LedgerQ demonstrates a strong security posture with:
@@ -292,3 +337,4 @@ No critical or high-severity security issues were identified.
 
 **Audited by:** Automated security tools + manual review
 **Next audit recommended:** After major version releases or significant changes
+**Audit command:** `make audit`
