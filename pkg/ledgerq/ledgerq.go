@@ -53,6 +53,9 @@ type Message struct {
 
 	// Timestamp is when the message was enqueued (Unix nanoseconds)
 	Timestamp int64
+
+	// ExpiresAt is when the message expires (Unix nanoseconds), 0 if no TTL
+	ExpiresAt int64
 }
 
 // Options configures queue behavior.
@@ -247,6 +250,13 @@ func (q *Queue) Enqueue(payload []byte) (uint64, error) {
 	return q.q.Enqueue(payload)
 }
 
+// EnqueueWithTTL appends a message to the queue with a time-to-live duration.
+// The message will expire after the specified TTL and will be skipped during dequeue.
+// Returns the offset where the message was written.
+func (q *Queue) EnqueueWithTTL(payload []byte, ttl time.Duration) (uint64, error) {
+	return q.q.EnqueueWithTTL(payload, ttl)
+}
+
 // EnqueueBatch appends multiple messages to the queue in a single operation.
 // This is more efficient than calling Enqueue() multiple times.
 // Returns the offsets where the messages were written.
@@ -256,6 +266,7 @@ func (q *Queue) EnqueueBatch(payloads [][]byte) ([]uint64, error) {
 
 // Dequeue retrieves the next message from the queue.
 // Returns an error if no messages are available.
+// Automatically skips expired messages with TTL.
 func (q *Queue) Dequeue() (*Message, error) {
 	msg, err := q.q.Dequeue()
 	if err != nil {
@@ -267,11 +278,13 @@ func (q *Queue) Dequeue() (*Message, error) {
 		Offset:    msg.Offset,
 		Payload:   msg.Payload,
 		Timestamp: msg.Timestamp,
+		ExpiresAt: msg.ExpiresAt,
 	}, nil
 }
 
 // DequeueBatch retrieves up to maxMessages from the queue in a single operation.
 // Returns fewer messages if the queue has fewer than maxMessages available.
+// Automatically skips expired messages with TTL.
 func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 	msgs, err := q.q.DequeueBatch(maxMessages)
 	if err != nil {
@@ -285,6 +298,7 @@ func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 			Offset:    msg.Offset,
 			Payload:   msg.Payload,
 			Timestamp: msg.Timestamp,
+			ExpiresAt: msg.ExpiresAt,
 		}
 	}
 
@@ -370,6 +384,7 @@ func (q *Queue) Stream(ctx context.Context, handler StreamHandler) error {
 			Offset:    msg.Offset,
 			Payload:   msg.Payload,
 			Timestamp: msg.Timestamp,
+			ExpiresAt: msg.ExpiresAt,
 		})
 	}
 

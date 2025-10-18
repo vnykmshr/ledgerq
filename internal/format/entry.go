@@ -18,6 +18,7 @@ const (
 	EntryFlagNone       uint8 = 0
 	EntryFlagCompressed uint8 = 1 << 0 // Payload is compressed
 	EntryFlagEncrypted  uint8 = 1 << 1 // Payload is encrypted
+	EntryFlagTTL        uint8 = 1 << 2 // Entry has TTL (expiration time)
 )
 
 // EntryHeaderSize is the size of the entry header in bytes (22 bytes).
@@ -27,10 +28,12 @@ const EntryHeaderSize = 22
 // Entry represents a single message entry in a segment file.
 //
 // Binary format (little-endian):
-//   [Length:4][Type:1][Flags:1][MsgID:8][Timestamp:8][Payload:N][CRC32C:4]
+//   [Length:4][Type:1][Flags:1][MsgID:8][Timestamp:8][ExpiresAt:8?][Payload:N][CRC32C:4]
 //
-// Total header size: 22 bytes
-// Total entry size: 22 + len(Payload) + 4 bytes
+// Total header size: 22 bytes (30 bytes with TTL)
+// Total entry size: 22 + len(Payload) + 4 bytes (or 30 + len(Payload) + 4 with TTL)
+//
+// Note: ExpiresAt is only present if EntryFlagTTL is set in Flags
 type Entry struct {
 	// Length is the total size of the entry including header and CRC (excludes the length field itself)
 	Length uint32
@@ -38,7 +41,7 @@ type Entry struct {
 	// Type indicates the entry type (Data, Tombstone, Checkpoint)
 	Type uint8
 
-	// Flags contains entry flags (compressed, encrypted, etc.)
+	// Flags contains entry flags (compressed, encrypted, TTL, etc.)
 	Flags uint8
 
 	// MsgID is the unique message identifier
@@ -47,6 +50,10 @@ type Entry struct {
 	// Timestamp is the Unix time in nanoseconds when the entry was created
 	Timestamp int64
 
+	// ExpiresAt is the Unix time in nanoseconds when the message expires (0 = no expiration)
+	// Only serialized if EntryFlagTTL is set
+	ExpiresAt int64
+
 	// Payload is the message data
 	Payload []byte
 }
@@ -54,11 +61,22 @@ type Entry struct {
 // Marshal encodes the entry into binary format with CRC32C checksum.
 // Returns the complete entry bytes ready to be written to disk.
 func (e *Entry) Marshal() []byte {
-	totalLen := 4 + EntryHeaderSize + len(e.Payload) + 4 // length field + header + payload + crc
+	// Set TTL flag if ExpiresAt is specified
+	if e.ExpiresAt > 0 {
+		e.Flags |= EntryFlagTTL
+	}
+
+	// Calculate total length including optional TTL field
+	headerSize := EntryHeaderSize
+	if e.Flags&EntryFlagTTL != 0 {
+		headerSize += 8 // Add 8 bytes for ExpiresAt
+	}
+
+	totalLen := 4 + headerSize + len(e.Payload) + 4 // length field + header + payload + crc
 	buf := make([]byte, totalLen)
 
 	// Calculate and set the Length field (excludes the length field itself)
-	e.Length = uint32(EntryHeaderSize + len(e.Payload) + 4) //nolint:gosec // G115: Safe conversion, payload limited by file size
+	e.Length = uint32(headerSize + len(e.Payload) + 4) //nolint:gosec // G115: Safe conversion, payload limited by file size
 
 	// Write all fields (length is at offset 0, header starts at offset 4)
 	offset := 0
@@ -73,6 +91,12 @@ func (e *Entry) Marshal() []byte {
 	offset += 8
 	binary.LittleEndian.PutUint64(buf[offset:], uint64(e.Timestamp)) //nolint:gosec // G115: Safe uint64 conversion
 	offset += 8
+
+	// Write ExpiresAt if TTL flag is set
+	if e.Flags&EntryFlagTTL != 0 {
+		binary.LittleEndian.PutUint64(buf[offset:], uint64(e.ExpiresAt)) //nolint:gosec // G115: Safe uint64 conversion
+		offset += 8
+	}
 
 	// Write payload
 	copy(buf[offset:], e.Payload)
@@ -125,11 +149,22 @@ func Unmarshal(r io.Reader) (*Entry, error) {
 		Timestamp: int64(binary.LittleEndian.Uint64(buf[14:22])), //nolint:gosec // G115: Safe int64 conversion
 	}
 
+	// Parse ExpiresAt if TTL flag is set
+	offset := 22 // Start after base header
+	if entry.Flags&EntryFlagTTL != 0 {
+		if len(buf) < 30+4 { // Min size with TTL
+			return nil, fmt.Errorf("entry has TTL flag but insufficient data")
+		}
+		entry.ExpiresAt = int64(binary.LittleEndian.Uint64(buf[offset:offset+8])) //nolint:gosec // G115: Safe int64 conversion
+		offset += 8
+	}
+
 	// Extract payload (everything between header and CRC)
-	payloadLen := len(buf) - EntryHeaderSize - 4
-	if payloadLen > 0 {
-		entry.Payload = make([]byte, payloadLen)
-		copy(entry.Payload, buf[22:len(buf)-4])
+	payloadStart := offset
+	payloadEnd := len(buf) - 4 // Exclude CRC
+	if payloadEnd > payloadStart {
+		entry.Payload = make([]byte, payloadEnd-payloadStart)
+		copy(entry.Payload, buf[payloadStart:payloadEnd])
 	}
 
 	return entry, nil
@@ -151,9 +186,32 @@ func (e *Entry) Validate() error {
 	if e.Timestamp <= 0 {
 		return fmt.Errorf("invalid timestamp: %d", e.Timestamp)
 	}
-	expectedLength := uint32(EntryHeaderSize + len(e.Payload) + 4) //nolint:gosec // G115: Safe conversion, payload limited by file size
+
+	// Calculate expected length based on flags
+	headerSize := EntryHeaderSize
+	if e.Flags&EntryFlagTTL != 0 {
+		headerSize += 8
+		// Validate ExpiresAt if TTL flag is set
+		if e.ExpiresAt <= 0 {
+			return fmt.Errorf("TTL flag set but ExpiresAt is invalid: %d", e.ExpiresAt)
+		}
+		if e.ExpiresAt <= e.Timestamp {
+			return fmt.Errorf("ExpiresAt (%d) must be after Timestamp (%d)", e.ExpiresAt, e.Timestamp)
+		}
+	}
+
+	expectedLength := uint32(headerSize + len(e.Payload) + 4) //nolint:gosec // G115: Safe conversion, payload limited by file size
 	if e.Length != expectedLength {
 		return fmt.Errorf("length mismatch: got %d, expected %d", e.Length, expectedLength)
 	}
 	return nil
+}
+
+// IsExpired returns true if the message has expired based on the given current time.
+// Returns false if the message has no TTL.
+func (e *Entry) IsExpired(now int64) bool {
+	if e.Flags&EntryFlagTTL == 0 {
+		return false
+	}
+	return now >= e.ExpiresAt
 }

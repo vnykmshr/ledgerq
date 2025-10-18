@@ -298,6 +298,78 @@ func (q *Queue) Enqueue(payload []byte) (uint64, error) {
 	return offset, nil
 }
 
+// EnqueueWithTTL appends a message to the queue with a time-to-live duration.
+// The message will expire after the specified TTL and will be skipped during dequeue.
+// Returns the offset where the message was written.
+func (q *Queue) EnqueueWithTTL(payload []byte, ttl time.Duration) (uint64, error) {
+	start := time.Now()
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.closed {
+		q.opts.MetricsCollector.RecordEnqueueError()
+		return 0, fmt.Errorf("queue is closed")
+	}
+
+	if ttl <= 0 {
+		return 0, fmt.Errorf("TTL must be positive")
+	}
+
+	msgID := q.nextMsgID
+	now := time.Now().UnixNano()
+
+	// Create entry with TTL
+	entry := &format.Entry{
+		Type:      format.EntryTypeData,
+		Flags:     format.EntryFlagTTL,
+		MsgID:     msgID,
+		Timestamp: now,
+		ExpiresAt: now + ttl.Nanoseconds(),
+		Payload:   payload,
+	}
+
+	// Write to segment
+	offset, err := q.segments.Write(entry)
+	if err != nil {
+		q.opts.MetricsCollector.RecordEnqueueError()
+		q.opts.Logger.Error("enqueue with TTL failed",
+			logging.F("msg_id", msgID),
+			logging.F("ttl", ttl.String()),
+			logging.F("error", err.Error()),
+		)
+		return 0, fmt.Errorf("failed to write entry: %w", err)
+	}
+
+	// Increment message ID
+	q.nextMsgID++
+
+	// Update metadata
+	if err := q.metadata.SetNextMsgID(q.nextMsgID); err != nil {
+		return offset, fmt.Errorf("failed to update metadata: %w", err)
+	}
+
+	// Sync if auto-sync is enabled
+	if q.opts.AutoSync {
+		if err := q.segments.Sync(); err != nil {
+			return offset, fmt.Errorf("failed to sync: %w", err)
+		}
+	}
+
+	q.opts.Logger.Debug("message enqueued with TTL",
+		logging.F("msg_id", msgID),
+		logging.F("offset", offset),
+		logging.F("payload_size", len(payload)),
+		logging.F("ttl", ttl.String()),
+		logging.F("expires_at", entry.ExpiresAt),
+	)
+
+	// Record metrics
+	q.opts.MetricsCollector.RecordEnqueue(len(payload), time.Since(start))
+
+	return offset, nil
+}
+
 // EnqueueBatch appends multiple messages to the queue in a single operation.
 // This is more efficient than calling Enqueue() multiple times as it performs
 // a single fsync for all messages.
@@ -381,6 +453,9 @@ type Message struct {
 
 	// Timestamp is when the message was enqueued (Unix nanoseconds)
 	Timestamp int64
+
+	// ExpiresAt is when the message expires (Unix nanoseconds), 0 if no TTL
+	ExpiresAt int64
 }
 
 // Dequeue retrieves the next message from the queue.
