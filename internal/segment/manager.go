@@ -387,13 +387,13 @@ func (m *Manager) Compact() (*CompactionResult, error) {
 		bytesFreed += seg.Size
 
 		// Remove segment file
-		if err := removeFile(seg.Path); err != nil {
+		if err := os.Remove(seg.Path); err != nil {
 			return nil, fmt.Errorf("failed to remove segment %s: %w", seg.Path, err)
 		}
 
 		// Remove index file if it exists
 		if seg.IndexPath != "" {
-			_ = removeFile(seg.IndexPath) // Ignore error if index doesn't exist
+			_ = os.Remove(seg.IndexPath) // Ignore error if index doesn't exist
 		}
 	}
 
@@ -415,7 +415,7 @@ func (m *Manager) Compact() (*CompactionResult, error) {
 	var oldestAge time.Duration
 	if len(m.segments) > 0 {
 		oldestSeg := m.segments[0]
-		if info, err := getFileInfo(oldestSeg.Path); err == nil {
+		if info, err := os.Stat(oldestSeg.Path); err == nil {
 			oldestAge = time.Since(info.ModTime())
 		}
 	}
@@ -459,7 +459,7 @@ func (m *Manager) selectSegmentsForRemoval(policy *RetentionPolicy) []*SegmentIn
 
 		// Check age-based retention
 		if policy.MaxAge > 0 {
-			if info, err := getFileInfo(seg.Path); err == nil {
+			if info, err := os.Stat(seg.Path); err == nil {
 				age := now.Sub(info.ModTime())
 				if age > policy.MaxAge {
 					shouldRemove = true
@@ -499,14 +499,4 @@ func (m *Manager) calculateTotalSize(segments []*SegmentInfo) uint64 {
 		}
 	}
 	return total
-}
-
-// Helper functions for file operations
-
-func removeFile(path string) error {
-	return os.Remove(path)
-}
-
-func getFileInfo(path string) (os.FileInfo, error) {
-	return os.Stat(path)
 }
