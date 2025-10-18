@@ -148,8 +148,18 @@ func (w *Writer) Write(entry *format.Entry) (uint64, error) {
 		return 0, fmt.Errorf("writer is closed")
 	}
 
+	// Set TTL flag if ExpiresAt is specified (Marshal also does this, but we need it for validation)
+	if entry.ExpiresAt > 0 {
+		entry.Flags |= format.EntryFlagTTL
+	}
+
 	// Set entry length before validation (Marshal would do this, but we validate first)
-	entry.Length = uint32(format.EntryHeaderSize + len(entry.Payload) + 4) //nolint:gosec // G115: Safe conversion
+	// Account for TTL field if flag is set
+	headerSize := format.EntryHeaderSize
+	if entry.Flags&format.EntryFlagTTL != 0 {
+		headerSize += 8 // Add 8 bytes for ExpiresAt
+	}
+	entry.Length = uint32(headerSize + len(entry.Payload) + 4) //nolint:gosec // G115: Safe conversion
 
 	// Validate entry
 	if err := entry.Validate(); err != nil {

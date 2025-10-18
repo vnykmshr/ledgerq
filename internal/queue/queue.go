@@ -460,6 +460,7 @@ type Message struct {
 
 // Dequeue retrieves the next message from the queue.
 // Returns an error if no messages available.
+// Automatically skips expired messages (with TTL).
 func (q *Queue) Dequeue() (*Message, error) {
 	start := time.Now()
 
@@ -471,70 +472,108 @@ func (q *Queue) Dequeue() (*Message, error) {
 		return nil, fmt.Errorf("queue is closed")
 	}
 
-	// Check if there are any messages to read
-	if q.readMsgID >= q.nextMsgID {
-		q.opts.MetricsCollector.RecordDequeueError()
-		return nil, fmt.Errorf("no messages available")
-	}
-
 	// Ensure data is flushed to disk before reading
 	if err := q.segments.Sync(); err != nil {
 		q.opts.MetricsCollector.RecordDequeueError()
 		return nil, fmt.Errorf("failed to sync before dequeue: %w", err)
 	}
 
-	// Find the segment containing the read message ID
-	allSegments := q.segments.GetSegments()
+	// Get current time for TTL checking
+	now := time.Now().UnixNano()
 
-	// Add active segment to search
-	activeSeg := q.segments.GetActiveSegment()
-	if activeSeg != nil {
-		allSegments = append(allSegments, activeSeg)
-	}
+	// Loop to skip expired messages
+	maxAttempts := 1000 // Prevent infinite loop
+	attempts := 0
 
-	// Search for the segment containing readMsgID
-	for _, seg := range allSegments {
-		reader, err := q.segments.OpenReader(seg.BaseOffset)
-		if err != nil {
-			continue
+	for attempts < maxAttempts {
+		attempts++
+
+		// Check if there are any messages to read
+		if q.readMsgID >= q.nextMsgID {
+			q.opts.MetricsCollector.RecordDequeueError()
+			return nil, fmt.Errorf("no messages available")
 		}
 
-		// Check if this segment might contain our message
-		// We'll do a simple scan approach for now
-		entry, offset, _, err := reader.FindByMessageID(q.readMsgID)
-		_ = reader.Close()
+		// Find the segment containing the read message ID
+		allSegments := q.segments.GetSegments()
 
-		if err == nil {
-			// Found the message!
-			msg := &Message{
-				ID:        entry.MsgID,
-				Offset:    offset,
-				Payload:   entry.Payload,
-				Timestamp: entry.Timestamp,
+		// Add active segment to search
+		activeSeg := q.segments.GetActiveSegment()
+		if activeSeg != nil {
+			allSegments = append(allSegments, activeSeg)
+		}
+
+		// Search for the segment containing readMsgID
+		found := false
+		for _, seg := range allSegments {
+			reader, err := q.segments.OpenReader(seg.BaseOffset)
+			if err != nil {
+				continue
 			}
 
-			// Advance read position
-			q.readMsgID++
+			// Check if this segment might contain our message
+			entry, offset, _, err := reader.FindByMessageID(q.readMsgID)
+			_ = reader.Close()
 
-			// Update metadata
-			if err := q.metadata.SetReadMsgID(q.readMsgID); err != nil {
-				return msg, fmt.Errorf("failed to update metadata: %w", err)
+			if err == nil {
+				found = true
+
+				// Check if message has expired
+				if entry.IsExpired(now) {
+					// Skip expired message
+					q.opts.Logger.Debug("skipping expired message",
+						logging.F("msg_id", entry.MsgID),
+						logging.F("expires_at", entry.ExpiresAt),
+						logging.F("now", now),
+					)
+
+					// Advance read position and continue
+					q.readMsgID++
+					if err := q.metadata.SetReadMsgID(q.readMsgID); err != nil {
+						return nil, fmt.Errorf("failed to update metadata: %w", err)
+					}
+					break // Continue outer loop
+				}
+
+				// Found valid (non-expired) message!
+				msg := &Message{
+					ID:        entry.MsgID,
+					Offset:    offset,
+					Payload:   entry.Payload,
+					Timestamp: entry.Timestamp,
+					ExpiresAt: entry.ExpiresAt,
+				}
+
+				// Advance read position
+				q.readMsgID++
+
+				// Update metadata
+				if err := q.metadata.SetReadMsgID(q.readMsgID); err != nil {
+					return msg, fmt.Errorf("failed to update metadata: %w", err)
+				}
+
+				// Record metrics
+				q.opts.MetricsCollector.RecordDequeue(len(msg.Payload), time.Since(start))
+
+				return msg, nil
 			}
+		}
 
-			// Record metrics
-			q.opts.MetricsCollector.RecordDequeue(len(msg.Payload), time.Since(start))
-
-			return msg, nil
+		if !found {
+			q.opts.MetricsCollector.RecordDequeueError()
+			return nil, fmt.Errorf("message ID %d not found", q.readMsgID)
 		}
 	}
 
+	// Exceeded max attempts (too many consecutive expired messages)
 	q.opts.MetricsCollector.RecordDequeueError()
-	return nil, fmt.Errorf("message ID %d not found", q.readMsgID)
+	return nil, fmt.Errorf("exceeded maximum attempts while skipping expired messages")
 }
 
 // DequeueBatch retrieves up to maxMessages from the queue in a single operation.
 // Returns fewer messages if the queue has fewer than maxMessages available.
 // Returns an error if no messages are available.
+// Automatically skips expired messages (with TTL).
 func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 	start := time.Now()
 
@@ -562,14 +601,23 @@ func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 		return nil, fmt.Errorf("failed to sync before dequeue: %w", err)
 	}
 
-	// Determine how many messages we can actually read
+	// Get current time for TTL checking
+	now := time.Now().UnixNano()
+
+	// Determine how many messages we can actually read (upper bound)
 	available := q.nextMsgID - q.readMsgID
-	count := uint64(maxMessages)
-	if available < count {
-		count = available
+	maxToCheck := available
+	if uint64(maxMessages) < maxToCheck {
+		maxToCheck = uint64(maxMessages)
 	}
 
-	messages := make([]*Message, 0, count)
+	// Add buffer for expired messages we might skip
+	maxToCheck = maxToCheck + 1000 // Check up to 1000 extra in case of expired
+	if maxToCheck > available {
+		maxToCheck = available
+	}
+
+	messages := make([]*Message, 0, maxMessages)
 	totalBytes := 0
 
 	// Get all segments
@@ -579,9 +627,15 @@ func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 		allSegments = append(allSegments, activeSeg)
 	}
 
-	// Read messages
-	for i := uint64(0); i < count; i++ {
-		targetMsgID := q.readMsgID + i
+	// Read messages, skipping expired ones
+	checked := uint64(0)
+	for checked < maxToCheck && len(messages) < maxMessages {
+		targetMsgID := q.readMsgID
+
+		// Check if we've reached the end
+		if targetMsgID >= q.nextMsgID {
+			break
+		}
 
 		// Search for the message in segments
 		found := false
@@ -595,15 +649,32 @@ func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 			_ = reader.Close()
 
 			if err == nil {
+				found = true
+
+				// Check if message has expired
+				if entry.IsExpired(now) {
+					// Skip expired message
+					q.opts.Logger.Debug("skipping expired message in batch",
+						logging.F("msg_id", entry.MsgID),
+						logging.F("expires_at", entry.ExpiresAt),
+					)
+					q.readMsgID++
+					checked++
+					break // Continue to next message
+				}
+
+				// Valid message - add to results
 				msg := &Message{
 					ID:        entry.MsgID,
 					Offset:    offset,
 					Payload:   entry.Payload,
 					Timestamp: entry.Timestamp,
+					ExpiresAt: entry.ExpiresAt,
 				}
 				messages = append(messages, msg)
 				totalBytes += len(msg.Payload)
-				found = true
+				q.readMsgID++
+				checked++
 				break
 			}
 		}
@@ -614,10 +685,7 @@ func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 		}
 	}
 
-	// Advance read position by the number of messages we actually read
-	q.readMsgID += uint64(len(messages))
-
-	// Update metadata
+	// Update metadata with new read position
 	if err := q.metadata.SetReadMsgID(q.readMsgID); err != nil {
 		return messages, fmt.Errorf("failed to update metadata: %w", err)
 	}
