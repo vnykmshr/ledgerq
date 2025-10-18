@@ -43,6 +43,13 @@ go.work
 # Development todos (workflow management)
 /todos/
 
-# Built binaries
-ledgerq-cli
-metrics
+# Built binaries (in project root only)
+/ledgerq-cli
+/ledgerq
+/simple
+/producer-consumer
+/streaming
+/ttl
+/headers
+/replay
+/metrics
