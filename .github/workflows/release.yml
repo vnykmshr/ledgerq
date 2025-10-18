@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Run tests
+        run: go test -race -v ./...
+
+      - name: Build binaries
+        run: |
+          # Linux amd64
+          GOOS=linux GOARCH=amd64 go build -o ledgerq-linux-amd64 ./cmd/ledgerq
+
+          # Linux arm64
+          GOOS=linux GOARCH=arm64 go build -o ledgerq-linux-arm64 ./cmd/ledgerq
+
+          # macOS amd64
+          GOOS=darwin GOARCH=amd64 go build -o ledgerq-darwin-amd64 ./cmd/ledgerq
+
+          # macOS arm64
+          GOOS=darwin GOARCH=arm64 go build -o ledgerq-darwin-arm64 ./cmd/ledgerq
+
+          # Windows amd64
+          GOOS=windows GOARCH=amd64 go build -o ledgerq-windows-amd64.exe ./cmd/ledgerq
+
+          # Create checksums
+          sha256sum ledgerq-* > checksums.txt
+
+      - name: Extract release notes
+        id: release_notes
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          # Extract release notes from CHANGELOG.md
+          awk '/^## \['$VERSION'\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md > release_notes.md
+
+          # If no release notes found, use a default message
+          if [ ! -s release_notes.md ]; then
+            echo "Release $VERSION" > release_notes.md
+            echo "" >> release_notes.md
+            echo "See [CHANGELOG.md](https://github.com/vnykmshr/ledgerq/blob/main/CHANGELOG.md) for details." >> release_notes.md
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md
+          files: |
+            ledgerq-linux-amd64
+            ledgerq-linux-arm64
+            ledgerq-darwin-amd64
+            ledgerq-darwin-arm64
+            ledgerq-windows-amd64.exe
+            checksums.txt
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
