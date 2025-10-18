@@ -153,11 +153,24 @@ func (w *Writer) Write(entry *format.Entry) (uint64, error) {
 		entry.Flags |= format.EntryFlagTTL
 	}
 
+	// Set Headers flag if headers are present (Marshal also does this, but we need it for validation)
+	if len(entry.Headers) > 0 {
+		entry.Flags |= format.EntryFlagHeaders
+	}
+
 	// Set entry length before validation (Marshal would do this, but we validate first)
-	// Account for TTL field if flag is set
+	// Account for optional fields based on flags
 	headerSize := format.EntryHeaderSize
 	if entry.Flags&format.EntryFlagTTL != 0 {
 		headerSize += 8 // Add 8 bytes for ExpiresAt
+	}
+	if entry.Flags&format.EntryFlagHeaders != 0 {
+		// Calculate headers size (will be computed by format package too, but we need it here)
+		headersSize := 2 // NumHeaders field
+		for k, v := range entry.Headers {
+			headersSize += 2 + len(k) + 2 + len(v)
+		}
+		headerSize += headersSize
 	}
 	entry.Length = uint32(headerSize + len(entry.Payload) + 4) //nolint:gosec // G115: Safe conversion
 

@@ -370,6 +370,147 @@ func (q *Queue) EnqueueWithTTL(payload []byte, ttl time.Duration) (uint64, error
 	return offset, nil
 }
 
+// EnqueueWithHeaders appends a message to the queue with key-value metadata headers.
+// Headers can be used for routing, tracing, content-type indication, or message classification.
+// Returns the offset where the message was written.
+func (q *Queue) EnqueueWithHeaders(payload []byte, headers map[string]string) (uint64, error) {
+	start := time.Now()
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.closed {
+		q.opts.MetricsCollector.RecordEnqueueError()
+		return 0, fmt.Errorf("queue is closed")
+	}
+
+	msgID := q.nextMsgID
+
+	// Create entry with headers
+	entry := &format.Entry{
+		Type:      format.EntryTypeData,
+		Flags:     format.EntryFlagHeaders,
+		MsgID:     msgID,
+		Timestamp: time.Now().UnixNano(),
+		Headers:   headers,
+		Payload:   payload,
+	}
+
+	// Write to segment
+	offset, err := q.segments.Write(entry)
+	if err != nil {
+		q.opts.MetricsCollector.RecordEnqueueError()
+		q.opts.Logger.Error("enqueue with headers failed",
+			logging.F("msg_id", msgID),
+			logging.F("headers_count", len(headers)),
+			logging.F("error", err.Error()),
+		)
+		return 0, fmt.Errorf("failed to write entry: %w", err)
+	}
+
+	// Increment message ID
+	q.nextMsgID++
+
+	// Update metadata
+	if err := q.metadata.SetNextMsgID(q.nextMsgID); err != nil {
+		return offset, fmt.Errorf("failed to update metadata: %w", err)
+	}
+
+	// Sync if auto-sync is enabled
+	if q.opts.AutoSync {
+		if err := q.segments.Sync(); err != nil {
+			return offset, fmt.Errorf("failed to sync: %w", err)
+		}
+	}
+
+	q.opts.Logger.Debug("message enqueued with headers",
+		logging.F("msg_id", msgID),
+		logging.F("offset", offset),
+		logging.F("payload_size", len(payload)),
+		logging.F("headers_count", len(headers)),
+	)
+
+	// Record metrics
+	q.opts.MetricsCollector.RecordEnqueue(len(payload), time.Since(start))
+
+	return offset, nil
+}
+
+// EnqueueWithOptions appends a message with both TTL and headers.
+// This allows combining multiple features in a single enqueue operation.
+// Returns the offset where the message was written.
+func (q *Queue) EnqueueWithOptions(payload []byte, ttl time.Duration, headers map[string]string) (uint64, error) {
+	start := time.Now()
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.closed {
+		q.opts.MetricsCollector.RecordEnqueueError()
+		return 0, fmt.Errorf("queue is closed")
+	}
+
+	if ttl <= 0 {
+		return 0, fmt.Errorf("TTL must be positive")
+	}
+
+	msgID := q.nextMsgID
+	now := time.Now().UnixNano()
+
+	// Create entry with both TTL and headers
+	entry := &format.Entry{
+		Type:      format.EntryTypeData,
+		Flags:     format.EntryFlagTTL | format.EntryFlagHeaders,
+		MsgID:     msgID,
+		Timestamp: now,
+		ExpiresAt: now + ttl.Nanoseconds(),
+		Headers:   headers,
+		Payload:   payload,
+	}
+
+	// Write to segment
+	offset, err := q.segments.Write(entry)
+	if err != nil {
+		q.opts.MetricsCollector.RecordEnqueueError()
+		q.opts.Logger.Error("enqueue with options failed",
+			logging.F("msg_id", msgID),
+			logging.F("ttl", ttl.String()),
+			logging.F("headers_count", len(headers)),
+			logging.F("error", err.Error()),
+		)
+		return 0, fmt.Errorf("failed to write entry: %w", err)
+	}
+
+	// Increment message ID
+	q.nextMsgID++
+
+	// Update metadata
+	if err := q.metadata.SetNextMsgID(q.nextMsgID); err != nil {
+		return offset, fmt.Errorf("failed to update metadata: %w", err)
+	}
+
+	// Sync if auto-sync is enabled
+	if q.opts.AutoSync {
+		if err := q.segments.Sync(); err != nil {
+			return offset, fmt.Errorf("failed to sync: %w", err)
+		}
+	}
+
+	q.opts.Logger.Debug("message enqueued with TTL and headers",
+		logging.F("msg_id", msgID),
+		logging.F("offset", offset),
+		logging.F("payload_size", len(payload)),
+		logging.F("ttl", ttl.String()),
+		logging.F("headers_count", len(headers)),
+		logging.F("expires_at", entry.ExpiresAt),
+	)
+
+	// Record metrics
+	q.opts.MetricsCollector.RecordEnqueue(len(payload), time.Since(start))
+
+	return offset, nil
+}
+
 // EnqueueBatch appends multiple messages to the queue in a single operation.
 // This is more efficient than calling Enqueue() multiple times as it performs
 // a single fsync for all messages.
@@ -456,6 +597,9 @@ type Message struct {
 
 	// ExpiresAt is when the message expires (Unix nanoseconds), 0 if no TTL
 	ExpiresAt int64
+
+	// Headers contains key-value metadata for the message
+	Headers map[string]string
 }
 
 // Dequeue retrieves the next message from the queue.
@@ -542,6 +686,7 @@ func (q *Queue) Dequeue() (*Message, error) {
 					Payload:   entry.Payload,
 					Timestamp: entry.Timestamp,
 					ExpiresAt: entry.ExpiresAt,
+					Headers:   entry.Headers,
 				}
 
 				// Advance read position
@@ -670,6 +815,7 @@ func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 					Payload:   entry.Payload,
 					Timestamp: entry.Timestamp,
 					ExpiresAt: entry.ExpiresAt,
+					Headers:   entry.Headers,
 				}
 				messages = append(messages, msg)
 				totalBytes += len(msg.Payload)

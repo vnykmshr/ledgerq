@@ -56,6 +56,9 @@ type Message struct {
 
 	// ExpiresAt is when the message expires (Unix nanoseconds), 0 if no TTL
 	ExpiresAt int64
+
+	// Headers contains key-value metadata for the message
+	Headers map[string]string
 }
 
 // Options configures queue behavior.
@@ -257,6 +260,20 @@ func (q *Queue) EnqueueWithTTL(payload []byte, ttl time.Duration) (uint64, error
 	return q.q.EnqueueWithTTL(payload, ttl)
 }
 
+// EnqueueWithHeaders appends a message to the queue with key-value metadata headers.
+// Headers can be used for routing, tracing, content-type indication, or message classification.
+// Returns the offset where the message was written.
+func (q *Queue) EnqueueWithHeaders(payload []byte, headers map[string]string) (uint64, error) {
+	return q.q.EnqueueWithHeaders(payload, headers)
+}
+
+// EnqueueWithOptions appends a message with both TTL and headers.
+// This allows combining multiple features in a single enqueue operation.
+// Returns the offset where the message was written.
+func (q *Queue) EnqueueWithOptions(payload []byte, ttl time.Duration, headers map[string]string) (uint64, error) {
+	return q.q.EnqueueWithOptions(payload, ttl, headers)
+}
+
 // EnqueueBatch appends multiple messages to the queue in a single operation.
 // This is more efficient than calling Enqueue() multiple times.
 // Returns the offsets where the messages were written.
@@ -279,6 +296,7 @@ func (q *Queue) Dequeue() (*Message, error) {
 		Payload:   msg.Payload,
 		Timestamp: msg.Timestamp,
 		ExpiresAt: msg.ExpiresAt,
+		Headers:   msg.Headers,
 	}, nil
 }
 
@@ -299,6 +317,7 @@ func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 			Payload:   msg.Payload,
 			Timestamp: msg.Timestamp,
 			ExpiresAt: msg.ExpiresAt,
+			Headers:   msg.Headers,
 		}
 	}
 
@@ -385,6 +404,7 @@ func (q *Queue) Stream(ctx context.Context, handler StreamHandler) error {
 			Payload:   msg.Payload,
 			Timestamp: msg.Timestamp,
 			ExpiresAt: msg.ExpiresAt,
+			Headers:   msg.Headers,
 		})
 	}
 

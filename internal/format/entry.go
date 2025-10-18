@@ -19,6 +19,7 @@ const (
 	EntryFlagCompressed uint8 = 1 << 0 // Payload is compressed
 	EntryFlagEncrypted  uint8 = 1 << 1 // Payload is encrypted
 	EntryFlagTTL        uint8 = 1 << 2 // Entry has TTL (expiration time)
+	EntryFlagHeaders    uint8 = 1 << 3 // Entry has headers (metadata)
 )
 
 // EntryHeaderSize is the size of the entry header in bytes (22 bytes).
@@ -28,12 +29,16 @@ const EntryHeaderSize = 22
 // Entry represents a single message entry in a segment file.
 //
 // Binary format (little-endian):
-//   [Length:4][Type:1][Flags:1][MsgID:8][Timestamp:8][ExpiresAt:8?][Payload:N][CRC32C:4]
+//   [Length:4][Type:1][Flags:1][MsgID:8][Timestamp:8][ExpiresAt:8?][HeadersSize:2?][Headers:N?][Payload:N][CRC32C:4]
 //
-// Total header size: 22 bytes (30 bytes with TTL)
-// Total entry size: 22 + len(Payload) + 4 bytes (or 30 + len(Payload) + 4 with TTL)
+// Optional fields (included based on flags):
+//   - ExpiresAt (8 bytes): Present if EntryFlagTTL is set
+//   - HeadersSize (2 bytes) + Headers (N bytes): Present if EntryFlagHeaders is set
 //
-// Note: ExpiresAt is only present if EntryFlagTTL is set in Flags
+// Headers encoding:
+//   [NumHeaders:2][Key1Len:2][Key1:N][Value1Len:2][Value1:N]...[KeyNLen:2][KeyN:N][ValueNLen:2][ValueN:N]
+//
+// Total header size: 22 bytes (base) + 8 (TTL) + 2+N (Headers)
 type Entry struct {
 	// Length is the total size of the entry including header and CRC (excludes the length field itself)
 	Length uint32
@@ -41,7 +46,7 @@ type Entry struct {
 	// Type indicates the entry type (Data, Tombstone, Checkpoint)
 	Type uint8
 
-	// Flags contains entry flags (compressed, encrypted, TTL, etc.)
+	// Flags contains entry flags (compressed, encrypted, TTL, headers, etc.)
 	Flags uint8
 
 	// MsgID is the unique message identifier
@@ -54,8 +59,97 @@ type Entry struct {
 	// Only serialized if EntryFlagTTL is set
 	ExpiresAt int64
 
+	// Headers contains key-value metadata for the message
+	// Only serialized if EntryFlagHeaders is set
+	Headers map[string]string
+
 	// Payload is the message data
 	Payload []byte
+}
+
+// encodeHeaders encodes headers map into binary format.
+// Format: [NumHeaders:2][Key1Len:2][Key1:N][Value1Len:2][Value1:N]...
+func encodeHeaders(headers map[string]string) []byte {
+	if len(headers) == 0 {
+		return nil
+	}
+
+	// Calculate total size
+	size := 2 // NumHeaders
+	for k, v := range headers {
+		size += 2 + len(k) + 2 + len(v)
+	}
+
+	buf := make([]byte, size)
+	offset := 0
+
+	// Write number of headers
+	binary.LittleEndian.PutUint16(buf[offset:], uint16(len(headers))) //nolint:gosec // G115: Safe conversion
+	offset += 2
+
+	// Write each key-value pair
+	for k, v := range headers {
+		// Write key length and key
+		binary.LittleEndian.PutUint16(buf[offset:], uint16(len(k))) //nolint:gosec // G115: Safe conversion
+		offset += 2
+		copy(buf[offset:], k)
+		offset += len(k)
+
+		// Write value length and value
+		binary.LittleEndian.PutUint16(buf[offset:], uint16(len(v))) //nolint:gosec // G115: Safe conversion
+		offset += 2
+		copy(buf[offset:], v)
+		offset += len(v)
+	}
+
+	return buf
+}
+
+// decodeHeaders decodes headers from binary format.
+func decodeHeaders(data []byte) (map[string]string, int, error) {
+	if len(data) < 2 {
+		return nil, 0, fmt.Errorf("insufficient data for headers")
+	}
+
+	offset := 0
+	numHeaders := binary.LittleEndian.Uint16(data[offset:])
+	offset += 2
+
+	headers := make(map[string]string, numHeaders)
+
+	for i := uint16(0); i < numHeaders; i++ {
+		// Read key length
+		if offset+2 > len(data) {
+			return nil, 0, fmt.Errorf("insufficient data for key length")
+		}
+		keyLen := binary.LittleEndian.Uint16(data[offset:])
+		offset += 2
+
+		// Read key
+		if offset+int(keyLen) > len(data) {
+			return nil, 0, fmt.Errorf("insufficient data for key")
+		}
+		key := string(data[offset : offset+int(keyLen)])
+		offset += int(keyLen)
+
+		// Read value length
+		if offset+2 > len(data) {
+			return nil, 0, fmt.Errorf("insufficient data for value length")
+		}
+		valueLen := binary.LittleEndian.Uint16(data[offset:])
+		offset += 2
+
+		// Read value
+		if offset+int(valueLen) > len(data) {
+			return nil, 0, fmt.Errorf("insufficient data for value")
+		}
+		value := string(data[offset : offset+int(valueLen)])
+		offset += int(valueLen)
+
+		headers[key] = value
+	}
+
+	return headers, offset, nil
 }
 
 // Marshal encodes the entry into binary format with CRC32C checksum.
@@ -66,10 +160,22 @@ func (e *Entry) Marshal() []byte {
 		e.Flags |= EntryFlagTTL
 	}
 
-	// Calculate total length including optional TTL field
+	// Set Headers flag if headers are present
+	if len(e.Headers) > 0 {
+		e.Flags |= EntryFlagHeaders
+	}
+
+	// Calculate total length including optional fields
 	headerSize := EntryHeaderSize
 	if e.Flags&EntryFlagTTL != 0 {
 		headerSize += 8 // Add 8 bytes for ExpiresAt
+	}
+
+	// Encode headers if present
+	var headersData []byte
+	if e.Flags&EntryFlagHeaders != 0 {
+		headersData = encodeHeaders(e.Headers)
+		headerSize += len(headersData)
 	}
 
 	totalLen := 4 + headerSize + len(e.Payload) + 4 // length field + header + payload + crc
@@ -96,6 +202,12 @@ func (e *Entry) Marshal() []byte {
 	if e.Flags&EntryFlagTTL != 0 {
 		binary.LittleEndian.PutUint64(buf[offset:], uint64(e.ExpiresAt)) //nolint:gosec // G115: Safe uint64 conversion
 		offset += 8
+	}
+
+	// Write headers if present
+	if e.Flags&EntryFlagHeaders != 0 {
+		copy(buf[offset:], headersData)
+		offset += len(headersData)
 	}
 
 	// Write payload
@@ -159,7 +271,17 @@ func Unmarshal(r io.Reader) (*Entry, error) {
 		offset += 8
 	}
 
-	// Extract payload (everything between header and CRC)
+	// Parse Headers if flag is set
+	if entry.Flags&EntryFlagHeaders != 0 {
+		headers, bytesRead, err := decodeHeaders(buf[offset : len(buf)-4])
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode headers: %w", err)
+		}
+		entry.Headers = headers
+		offset += bytesRead
+	}
+
+	// Extract payload (everything between headers and CRC)
 	payloadStart := offset
 	payloadEnd := len(buf) - 4 // Exclude CRC
 	if payloadEnd > payloadStart {
@@ -198,6 +320,12 @@ func (e *Entry) Validate() error {
 		if e.ExpiresAt <= e.Timestamp {
 			return fmt.Errorf("ExpiresAt (%d) must be after Timestamp (%d)", e.ExpiresAt, e.Timestamp)
 		}
+	}
+
+	// Add headers size if present
+	if e.Flags&EntryFlagHeaders != 0 {
+		headersData := encodeHeaders(e.Headers)
+		headerSize += len(headersData)
 	}
 
 	expectedLength := uint32(headerSize + len(e.Payload) + 4) //nolint:gosec // G115: Safe conversion, payload limited by file size
