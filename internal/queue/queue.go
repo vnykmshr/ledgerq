@@ -185,11 +185,7 @@ func Open(dir string, opts *Options) (*Queue, error) {
 		q.priorityIndex = format.NewPriorityIndex()
 
 		// Rebuild priority index from existing segments
-		if err := q.rebuildPriorityIndex(); err != nil {
-			_ = segments.Close()
-			_ = metadata.Close()
-			return nil, fmt.Errorf("failed to rebuild priority index: %w", err)
-		}
+		q.rebuildPriorityIndex()
 	}
 
 	// Start periodic sync timer if configured
@@ -265,7 +261,7 @@ func recoverState(segments *segment.Manager) (nextMsgID, readMsgID uint64, err e
 
 // rebuildPriorityIndex scans all existing segments and rebuilds the priority index.
 // This is called when opening a queue with EnablePriorities=true.
-func (q *Queue) rebuildPriorityIndex() error {
+func (q *Queue) rebuildPriorityIndex() {
 	allSegments := q.segments.GetSegments()
 	activeSeg := q.segments.GetActiveSegment()
 	if activeSeg != nil {
@@ -274,7 +270,7 @@ func (q *Queue) rebuildPriorityIndex() error {
 
 	if len(allSegments) == 0 {
 		// No segments yet, nothing to rebuild
-		return nil
+		return
 	}
 
 	// Scan all segments and add entries to priority index
@@ -320,8 +316,6 @@ func (q *Queue) rebuildPriorityIndex() error {
 		logging.F("medium_priority", q.priorityIndex.CountByPriority(format.PriorityMedium)),
 		logging.F("low_priority", q.priorityIndex.CountByPriority(format.PriorityLow)),
 	)
-
-	return nil
 }
 
 // Enqueue appends a message to the queue.
@@ -1223,7 +1217,7 @@ func (q *Queue) dequeuePriority(now int64, start time.Time) (*Message, error) {
 			}
 
 			// Search for entry at target offset
-			err = reader.ScanAll(func(e *format.Entry, off uint64) error {
+			_ = reader.ScanAll(func(e *format.Entry, off uint64) error {
 				if off == targetOffset {
 					entry = e
 					fileOffset = off

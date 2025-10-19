@@ -3,7 +3,6 @@ package queue
 import (
 	"fmt"
 	"testing"
-	"time"
 )
 
 // setupQueue creates a test queue with optional options.
@@ -125,20 +124,6 @@ func assertPayloads(t *testing.T, messages []*Message, expected []string) {
 	}
 }
 
-// assertError checks that an error occurred and optionally contains expected text.
-func assertError(t *testing.T, err error, wantContains string) {
-	t.Helper()
-
-	if err == nil {
-		t.Errorf("expected error containing %q, got nil", wantContains)
-		return
-	}
-
-	if wantContains != "" && !contains(err.Error(), wantContains) {
-		t.Errorf("error = %q, want to contain %q", err.Error(), wantContains)
-	}
-}
-
 // assertNoError fails the test if err is not nil.
 func assertNoError(t *testing.T, err error) {
 	t.Helper()
@@ -146,51 +131,4 @@ func assertNoError(t *testing.T, err error) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-}
-
-// contains checks if s contains substr (simple helper to avoid importing strings in tests).
-func contains(s, substr string) bool {
-	return len(substr) == 0 || len(s) >= len(substr) && (s == substr || len(s) > len(substr) && indexOfString(s, substr) >= 0)
-}
-
-func indexOfString(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
-}
-
-// waitFor polls a condition function until it returns true or timeout is reached.
-// This eliminates flaky time.Sleep() calls in tests.
-func waitFor(t *testing.T, condition func() bool, timeout time.Duration, msg string) {
-	t.Helper()
-
-	deadline := time.Now().Add(timeout)
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		if condition() {
-			return
-		}
-
-		select {
-		case <-ticker.C:
-			if time.Now().After(deadline) {
-				t.Fatalf("timeout waiting for: %s", msg)
-			}
-		}
-	}
-}
-
-// waitForStats waits for queue stats to match expected values.
-func waitForStats(t *testing.T, q *Queue, total, pending uint64, timeout time.Duration) {
-	t.Helper()
-
-	waitFor(t, func() bool {
-		stats := q.Stats()
-		return stats.TotalMessages == total && stats.PendingMessages == pending
-	}, timeout, fmt.Sprintf("stats to match total=%d pending=%d", total, pending))
 }
