@@ -3,13 +3,14 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/vnykmshr/ledgerq.svg)](https://pkg.go.dev/github.com/vnykmshr/ledgerq/pkg/ledgerq)
 
-A persistent, disk-backed message queue for Go with no external dependencies.
+A disk-backed message queue with segment-based storage, TTL support, and priority ordering - written in pure Go with zero dependencies.
 
 ## Features
 
 - Crash-safe durability with append-only log design
 - Zero dependencies beyond the Go standard library
 - High throughput with batch operations
+- **Priority queue support (v1.1.0+)** with starvation prevention
 - Replay from message ID or timestamp
 - Message TTL and headers
 - Metrics and pluggable logging
@@ -37,7 +38,7 @@ For embedded or local-first applications that need something lighter than Kafka 
 ### Installation
 
 ```bash
-go get github.com/vnykmshr/ledgerq
+go get github.com/vnykmshr/ledgerq/pkg/ledgerq@latest
 ```
 
 ### Basic Usage
@@ -102,6 +103,35 @@ headers := map[string]string{"content-type": "application/json"}
 q.EnqueueWithHeaders(payload, headers)
 ```
 
+**Priority queue (v1.1.0+):**
+
+```go
+// Enable priority mode
+opts := ledgerq.DefaultOptions("/tmp/myqueue")
+opts.EnablePriorities = true
+q, _ := ledgerq.Open("/tmp/myqueue", opts)
+
+// Enqueue with priority
+q.EnqueueWithPriority([]byte("urgent"), ledgerq.PriorityHigh)
+q.EnqueueWithPriority([]byte("normal"), ledgerq.PriorityMedium)
+q.EnqueueWithPriority([]byte("background"), ledgerq.PriorityLow)
+
+// Dequeue in priority order (High → Medium → Low)
+msg, _ := q.Dequeue() // Returns "urgent" first
+```
+
+**Batch operations with priorities (v1.1.0+):**
+
+```go
+// Batch enqueue with per-message options
+messages := []ledgerq.BatchEnqueueOptions{
+    {Payload: []byte("urgent task"), Priority: ledgerq.PriorityHigh},
+    {Payload: []byte("normal task"), Priority: ledgerq.PriorityMedium},
+    {Payload: []byte("background task"), Priority: ledgerq.PriorityLow, TTL: time.Hour},
+}
+offsets, _ := q.EnqueueBatchWithOptions(messages)
+```
+
 **Streaming:**
 
 ```go
@@ -123,7 +153,7 @@ q.SeekToTimestamp(time.Now().Add(-1 * time.Hour).UnixNano())
 
 ## Performance
 
-Benchmarks on Intel i5-8257U:
+Benchmarks (Go 1.21, macOS, Intel i5-8257U @ 2.3GHz, 2025-10-18):
 
 | Operation | Throughput | Latency |
 |-----------|------------|---------|
@@ -145,6 +175,7 @@ See [examples/](examples/) for runnable code:
 - [headers](examples/headers) - Message metadata
 - [replay](examples/replay) - Seeking and replay
 - [metrics](examples/metrics) - Metrics collection
+- **[priority](examples/priority) - Priority queue (v1.1.0+)**
 
 ## CLI Tool
 
@@ -163,6 +194,38 @@ ledgerq peek /path/to/queue 5
 - [Architecture](docs/ARCHITECTURE.md) - Internal design
 - [API Reference](https://pkg.go.dev/github.com/vnykmshr/ledgerq/pkg/ledgerq) - GoDoc
 - [Contributing](CONTRIBUTING.md) - Development guide
+
+## Limitations
+
+### Batch Operations and Priority Queues
+
+**Important**: `DequeueBatch()` always returns messages in FIFO order (by message ID), even when `EnablePriorities=true`. This is a performance trade-off: batch dequeue optimizes for sequential I/O rather than priority ordering.
+
+For priority-aware consumption, use `Dequeue()` in a loop or the `Stream()` API.
+
+```go
+// FIFO batch dequeue (fast, sequential I/O)
+messages, _ := q.DequeueBatch(100)
+
+// Priority-aware dequeue (respects priority order)
+for i := 0; i < 100; i++ {
+    msg, err := q.Dequeue()
+    // ...
+}
+```
+
+### Priority Queue Memory Usage
+
+When `EnablePriorities=true`, the queue maintains an in-memory index of all unprocessed message IDs, organized by priority level. Memory usage scales linearly with queue depth (measured with runtime.MemStats):
+
+- 1M pending messages: ~24 MB
+- 10M pending messages: ~240 MB
+- 100M pending messages: ~2.4 GB
+
+For very deep queues (>10M messages), consider:
+- Using FIFO mode (`EnablePriorities=false`)
+- Implementing application-level batching to keep queue depth low
+- Running compaction regularly to remove processed messages
 
 ## Testing
 

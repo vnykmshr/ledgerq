@@ -324,3 +324,161 @@ func BenchmarkEntry_Unmarshal(b *testing.B) {
 		_, _ = Unmarshal(reader)
 	}
 }
+
+func TestEntry_Priority_Marshal_Unmarshal(t *testing.T) {
+	tests := []struct {
+		name     string
+		priority uint8
+	}{
+		{"low priority (default)", PriorityLow},
+		{"medium priority", PriorityMedium},
+		{"high priority", PriorityHigh},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := &Entry{
+				Type:      EntryTypeData,
+				MsgID:     12345,
+				Timestamp: time.Now().UnixNano(),
+				Priority:  tt.priority,
+				Payload:   []byte("test-payload"),
+			}
+
+			// Marshal
+			data := entry.Marshal()
+
+			// Unmarshal
+			reader := bytes.NewReader(data)
+			got, err := Unmarshal(reader)
+			if err != nil {
+				t.Fatalf("Unmarshal() error = %v", err)
+			}
+
+			// Verify priority
+			if got.Priority != tt.priority {
+				t.Errorf("Priority = %d, want %d", got.Priority, tt.priority)
+			}
+
+			// Verify flag is set correctly
+			if tt.priority == PriorityLow {
+				if got.Flags&EntryFlagPriority != 0 {
+					t.Error("EntryFlagPriority should not be set for PriorityLow")
+				}
+			} else {
+				if got.Flags&EntryFlagPriority == 0 {
+					t.Error("EntryFlagPriority should be set for non-Low priority")
+				}
+			}
+		})
+	}
+}
+
+func TestEntry_Priority_BackwardCompatibility(t *testing.T) {
+	// Entry without priority flag should default to PriorityLow
+	entry := &Entry{
+		Type:      EntryTypeData,
+		Flags:     EntryFlagNone, // No priority flag
+		MsgID:     12345,
+		Timestamp: time.Now().UnixNano(),
+		Payload:   []byte("test"),
+	}
+
+	data := entry.Marshal()
+	reader := bytes.NewReader(data)
+	got, err := Unmarshal(reader)
+	if err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	if got.Priority != PriorityLow {
+		t.Errorf("Priority = %d, want %d (default)", got.Priority, PriorityLow)
+	}
+}
+
+func TestEntry_Priority_WithTTLAndHeaders(t *testing.T) {
+	// Test priority combined with TTL and Headers
+	now := time.Now().UnixNano()
+	entry := &Entry{
+		Type:      EntryTypeData,
+		MsgID:     12345,
+		Timestamp: now,
+		Priority:  PriorityHigh,
+		ExpiresAt: now + int64(time.Hour),
+		Headers: map[string]string{
+			"content-type": "application/json",
+			"trace-id":     "abc-123",
+		},
+		Payload: []byte("important data"),
+	}
+
+	data := entry.Marshal()
+	reader := bytes.NewReader(data)
+	got, err := Unmarshal(reader)
+	if err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	if got.Priority != PriorityHigh {
+		t.Errorf("Priority = %d, want %d", got.Priority, PriorityHigh)
+	}
+	if got.ExpiresAt != entry.ExpiresAt {
+		t.Errorf("ExpiresAt = %d, want %d", got.ExpiresAt, entry.ExpiresAt)
+	}
+	if len(got.Headers) != len(entry.Headers) {
+		t.Errorf("Headers count = %d, want %d", len(got.Headers), len(entry.Headers))
+	}
+}
+
+func TestEntry_Priority_Validate(t *testing.T) {
+	now := time.Now().UnixNano()
+
+	tests := []struct {
+		name     string
+		entry    *Entry
+		wantErr  bool
+		errMatch string
+	}{
+		{
+			name: "valid high priority",
+			entry: &Entry{
+				Length:    uint32(EntryHeaderSize + 1 + 5 + 4),
+				Type:      EntryTypeData,
+				Flags:     EntryFlagPriority,
+				MsgID:     1,
+				Timestamp: now,
+				Priority:  PriorityHigh,
+				Payload:   []byte("hello"),
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid priority value",
+			entry: &Entry{
+				Length:    uint32(EntryHeaderSize + 1 + 5 + 4),
+				Type:      EntryTypeData,
+				Flags:     EntryFlagPriority,
+				MsgID:     1,
+				Timestamp: now,
+				Priority:  99, // invalid
+				Payload:   []byte("hello"),
+			},
+			wantErr:  true,
+			errMatch: "invalid priority value",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.entry.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && tt.errMatch != "" {
+				if err == nil || !bytes.Contains([]byte(err.Error()), []byte(tt.errMatch)) {
+					t.Errorf("expected error containing %q, got %v", tt.errMatch, err)
+				}
+			}
+		})
+	}
+}

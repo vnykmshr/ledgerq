@@ -7,11 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+<!-- Add changes here as they are implemented -->
+
+---
+
+## [1.1.0] - 2025-10-19
+
 ### Added
-- TBD
+
+#### Priority Queue Feature
+- **Priority Levels** - Three-level priority system (High, Medium, Low) for message ordering
+- **Priority-Aware Dequeue** - Messages are dequeued in priority order (High → Medium → Low) with FIFO within each level
+- **Starvation Prevention** - Automatic promotion of old low-priority messages after configurable time window (default 30s)
+- **Priority Index** - Efficient O(log n) binary search within each priority level using separate sorted slices
+- **Dual Mode Operation** - FIFO mode (default) or Priority mode via `EnablePriorities` option for backward compatibility
+- **Priority API** - New methods: `EnqueueWithPriority()` and `EnqueueWithAllOptions()` (priority + TTL + headers)
+- **Batch Operations with Priorities** - `EnqueueBatchWithOptions()` supports per-message priority, TTL, and headers with single fsync efficiency
+- **Priority Persistence** - Priority index is rebuilt from segments on queue restart
+- **Comprehensive Testing** - 16 new priority queue tests (single + batch) and 11 performance benchmarks
+- **Priority Example** - Complete example program demonstrating all priority features
+
+#### API Additions
+- `Priority` type (uint8): `PriorityLow` (0), `PriorityMedium` (1), `PriorityHigh` (2)
+- `EnqueueWithPriority(payload []byte, priority Priority) (uint64, error)` - Enqueue with specific priority
+- `EnqueueWithAllOptions(payload []byte, opts EnqueueOptions) (uint64, error)` - Enqueue with all features
+- `EnqueueOptions` struct with `Priority`, `TTL`, and `Headers` fields
+- `BatchEnqueueOptions` struct - Per-message options for batch operations
+- `EnqueueBatchWithOptions(messages []BatchEnqueueOptions) ([]uint64, error)` - Batch enqueue with per-message priority, TTL, and headers
+- `Options.EnablePriorities` (bool) - Enable priority queue mode (default: false)
+- `Options.PriorityStarvationWindow` (time.Duration) - Time before low-priority promotion (default: 30s)
+- `Message.Priority` field - Priority level of dequeued message
 
 ### Changed
-- TBD
+- Entry format now includes optional priority byte when `EntryFlagPriority` is set
+- Dequeue behavior: when `EnablePriorities=true`, returns highest priority message first
+- `EnqueueBatch()` documentation updated to note default priority behavior (PriorityLow)
+- Version constant updated to `1.1.0`
+
+### Performance
+- Priority queue overhead: ~1% compared to FIFO mode
+- Priority enqueue: ~4.3 µs/op
+- Priority dequeue: ~750 µs/op
+- Priority index rebuild: ~120 µs for 1K messages, ~1.2 ms for 10K messages
+
+### Fixed
+- Fixed bug where `EnablePriorities` and `PriorityStarvationWindow` options were not passed through in public API `Open()` method
 
 ---
 

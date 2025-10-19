@@ -7,20 +7,12 @@ import (
 
 // TestEnqueueWithTTL tests basic TTL enqueue functionality
 func TestEnqueueWithTTL(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue with 1 second TTL
 	payload := []byte("test message with TTL")
 	offset, err := q.EnqueueWithTTL(payload, 1*time.Second)
-	if err != nil {
-		t.Fatalf("EnqueueWithTTL() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if offset == 0 {
 		t.Error("EnqueueWithTTL() offset = 0, want > 0")
@@ -28,9 +20,7 @@ func TestEnqueueWithTTL(t *testing.T) {
 
 	// Dequeue immediately (should succeed)
 	msg, err := q.Dequeue()
-	if err != nil {
-		t.Fatalf("Dequeue() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if string(msg.Payload) != string(payload) {
 		t.Errorf("Payload = %s, want %s", msg.Payload, payload)
@@ -49,34 +39,22 @@ func TestEnqueueWithTTL(t *testing.T) {
 
 // TestTTL_MessageExpiration tests that expired messages are skipped
 func TestTTL_MessageExpiration(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue message with very short TTL (100ms)
-	_, err = q.EnqueueWithTTL([]byte("expires soon"), 100*time.Millisecond)
-	if err != nil {
-		t.Fatalf("EnqueueWithTTL() error = %v", err)
-	}
+	_, err := q.EnqueueWithTTL([]byte("expires soon"), 100*time.Millisecond)
+	assertNoError(t, err)
 
 	// Enqueue normal message
 	_, err = q.Enqueue([]byte("normal message"))
-	if err != nil {
-		t.Fatalf("Enqueue() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	// Wait for first message to expire
 	time.Sleep(150 * time.Millisecond)
 
 	// Dequeue should skip expired message and return second message
 	msg, err := q.Dequeue()
-	if err != nil {
-		t.Fatalf("Dequeue() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if string(msg.Payload) != "normal message" {
 		t.Errorf("Got %s, expected normal message (expired message should be skipped)", msg.Payload)
@@ -91,36 +69,26 @@ func TestTTL_MessageExpiration(t *testing.T) {
 
 // TestTTL_MultipleExpiredMessages tests skipping multiple expired messages
 func TestTTL_MultipleExpiredMessages(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue 3 messages with short TTL
 	for i := 0; i < 3; i++ {
-		_, err = q.EnqueueWithTTL([]byte("expires"), 50*time.Millisecond)
+		_, err := q.EnqueueWithTTL([]byte("expires"), 50*time.Millisecond)
 		if err != nil {
 			t.Fatalf("EnqueueWithTTL() error = %v", err)
 		}
 	}
 
 	// Enqueue valid message
-	_, err = q.Enqueue([]byte("valid"))
-	if err != nil {
-		t.Fatalf("Enqueue() error = %v", err)
-	}
+	_, err := q.Enqueue([]byte("valid"))
+	assertNoError(t, err)
 
 	// Wait for TTL messages to expire
 	time.Sleep(100 * time.Millisecond)
 
 	// Dequeue should skip all 3 expired and return the valid one
 	msg, err := q.Dequeue()
-	if err != nil {
-		t.Fatalf("Dequeue() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if string(msg.Payload) != "valid" {
 		t.Errorf("Got %s, expected valid", msg.Payload)
@@ -135,48 +103,30 @@ func TestTTL_MultipleExpiredMessages(t *testing.T) {
 
 // TestTTL_BatchDequeue tests TTL with batch operations
 func TestTTL_BatchDequeue(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue: expired, valid, expired, valid, expired
-	_, err = q.EnqueueWithTTL([]byte("expired1"), 50*time.Millisecond)
-	if err != nil {
-		t.Fatalf("EnqueueWithTTL() error = %v", err)
-	}
+	_, err := q.EnqueueWithTTL([]byte("expired1"), 50*time.Millisecond)
+	assertNoError(t, err)
 
 	_, err = q.Enqueue([]byte("valid1"))
-	if err != nil {
-		t.Fatalf("Enqueue() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	_, err = q.EnqueueWithTTL([]byte("expired2"), 50*time.Millisecond)
-	if err != nil {
-		t.Fatalf("EnqueueWithTTL() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	_, err = q.Enqueue([]byte("valid2"))
-	if err != nil {
-		t.Fatalf("Enqueue() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	_, err = q.EnqueueWithTTL([]byte("expired3"), 50*time.Millisecond)
-	if err != nil {
-		t.Fatalf("EnqueueWithTTL() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	// Wait for TTL messages to expire
 	time.Sleep(100 * time.Millisecond)
 
 	// Batch dequeue should skip expired and return only valid ones
 	messages, err := q.DequeueBatch(10)
-	if err != nil {
-		t.Fatalf("DequeueBatch() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	// Should get 2 valid messages
 	if len(messages) != 2 {
@@ -192,37 +142,25 @@ func TestTTL_BatchDequeue(t *testing.T) {
 	}
 }
 
-// TestTTL_ZeroTTL tests that zero TTL is rejected
-func TestTTL_ZeroTTL(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
+// TestTTL_InvalidDuration tests that invalid TTL values are rejected
+func TestTTL_InvalidDuration(t *testing.T) {
+	tests := []struct {
+		name string
+		ttl  time.Duration
+	}{
+		{"zero TTL", 0},
+		{"negative TTL", -1 * time.Second},
+		{"negative nanosecond", -1},
 	}
-	defer func() { _ = q.Close() }()
 
-	// Try to enqueue with zero TTL
-	_, err = q.EnqueueWithTTL([]byte("test"), 0)
-	if err == nil {
-		t.Error("EnqueueWithTTL() with zero TTL should fail")
-	}
-}
-
-// TestTTL_NegativeTTL tests that negative TTL is rejected
-func TestTTL_NegativeTTL(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
-
-	// Try to enqueue with negative TTL
-	_, err = q.EnqueueWithTTL([]byte("test"), -1*time.Second)
-	if err == nil {
-		t.Error("EnqueueWithTTL() with negative TTL should fail")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := setupQueue(t, nil)
+			_, err := q.EnqueueWithTTL([]byte("test"), tt.ttl)
+			if err == nil {
+				t.Errorf("EnqueueWithTTL() with %s should fail", tt.name)
+			}
+		})
 	}
 }
 
@@ -231,31 +169,18 @@ func TestTTL_Persistence(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// First session: enqueue with TTL
-	q1, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() first error = %v", err)
-	}
+	q1 := setupQueue(t, DefaultOptions(tmpDir))
 
-	_, err = q1.EnqueueWithTTL([]byte("persisted"), 5*time.Second)
-	if err != nil {
-		t.Fatalf("EnqueueWithTTL() error = %v", err)
-	}
+	_, err := q1.EnqueueWithTTL([]byte("persisted"), 5*time.Second)
+	assertNoError(t, err)
 
-	if err := q1.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
+	assertNoError(t, q1.Close())
 
 	// Second session: verify TTL is preserved
-	q2, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() second error = %v", err)
-	}
-	defer func() { _ = q2.Close() }()
+	q2 := setupQueue(t, DefaultOptions(tmpDir))
 
 	msg, err := q2.Dequeue()
-	if err != nil {
-		t.Fatalf("Dequeue() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if msg.ExpiresAt == 0 {
 		t.Error("ExpiresAt = 0 after persistence, want > 0")
@@ -268,25 +193,15 @@ func TestTTL_Persistence(t *testing.T) {
 
 // TestTTL_LongDuration tests messages with long TTL
 func TestTTL_LongDuration(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue with 1 hour TTL
-	_, err = q.EnqueueWithTTL([]byte("long lived"), 1*time.Hour)
-	if err != nil {
-		t.Fatalf("EnqueueWithTTL() error = %v", err)
-	}
+	_, err := q.EnqueueWithTTL([]byte("long lived"), 1*time.Hour)
+	assertNoError(t, err)
 
 	// Should be immediately dequeueable
 	msg, err := q.Dequeue()
-	if err != nil {
-		t.Fatalf("Dequeue() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if string(msg.Payload) != "long lived" {
 		t.Errorf("Payload = %s, want long lived", msg.Payload)
@@ -308,13 +223,7 @@ func TestTTL_LongDuration(t *testing.T) {
 
 // TestTTL_MixedMessages tests mix of TTL and non-TTL messages
 func TestTTL_MixedMessages(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue mixed messages
 	messages := []struct {
@@ -329,6 +238,7 @@ func TestTTL_MixedMessages(t *testing.T) {
 	}
 
 	for _, m := range messages {
+		var err error
 		if m.ttl != nil {
 			_, err = q.EnqueueWithTTL([]byte(m.payload), *m.ttl)
 		} else {
@@ -364,17 +274,11 @@ func TestTTL_MixedMessages(t *testing.T) {
 
 // TestTTL_AllExpired tests when all messages are expired
 func TestTTL_AllExpired(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue only expired messages
 	for i := 0; i < 5; i++ {
-		_, err = q.EnqueueWithTTL([]byte("expired"), 50*time.Millisecond)
+		_, err := q.EnqueueWithTTL([]byte("expired"), 50*time.Millisecond)
 		if err != nil {
 			t.Fatalf("EnqueueWithTTL() error = %v", err)
 		}
@@ -384,7 +288,7 @@ func TestTTL_AllExpired(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Dequeue should fail with "no messages available"
-	_, err = q.Dequeue()
+	_, err := q.Dequeue()
 	if err == nil {
 		t.Error("Dequeue() should fail when all messages are expired")
 	}

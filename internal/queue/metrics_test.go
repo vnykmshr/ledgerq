@@ -16,19 +16,10 @@ func TestQueue_WithMetrics(t *testing.T) {
 	opts := DefaultOptions(tmpDir)
 	opts.MetricsCollector = collector
 
-	q, err := Open(tmpDir, opts)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	defer q.Close()
+	q := setupQueue(t, opts)
 
 	// Enqueue some messages
-	for i := 0; i < 10; i++ {
-		_, err := q.Enqueue([]byte("test message"))
-		if err != nil {
-			t.Fatalf("Enqueue failed: %v", err)
-		}
-	}
+	enqueueN(t, q, 10)
 
 	// Enqueue a batch
 	payloads := [][]byte{
@@ -36,10 +27,8 @@ func TestQueue_WithMetrics(t *testing.T) {
 		[]byte("batch message 2"),
 		[]byte("batch message 3"),
 	}
-	_, err = q.EnqueueBatch(payloads)
-	if err != nil {
-		t.Fatalf("EnqueueBatch failed: %v", err)
-	}
+	_, err := q.EnqueueBatch(payloads)
+	assertNoError(t, err)
 
 	// Dequeue some messages
 	for i := 0; i < 5; i++ {
@@ -51,15 +40,10 @@ func TestQueue_WithMetrics(t *testing.T) {
 
 	// Dequeue a batch
 	_, err = q.DequeueBatch(3)
-	if err != nil {
-		t.Fatalf("DequeueBatch failed: %v", err)
-	}
+	assertNoError(t, err)
 
 	// Seek operation
-	err = q.SeekToMessageID(10)
-	if err != nil {
-		t.Fatalf("SeekToMessageID failed: %v", err)
-	}
+	assertNoError(t, q.SeekToMessageID(10))
 
 	// Get metrics snapshot
 	snapshot := collector.GetSnapshot()
@@ -123,16 +107,13 @@ func TestQueue_MetricsErrors(t *testing.T) {
 	opts := DefaultOptions(tmpDir)
 	opts.MetricsCollector = collector
 
-	q, err := Open(tmpDir, opts)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
+	q := setupQueue(t, opts)
 
 	// Close queue
-	q.Close()
+	assertNoError(t, q.Close())
 
 	// Try operations on closed queue
-	_, err = q.Enqueue([]byte("test"))
+	_, err := q.Enqueue([]byte("test"))
 	if err == nil {
 		t.Error("Expected error on closed queue")
 	}
@@ -164,11 +145,7 @@ func TestQueue_CompactionMetrics(t *testing.T) {
 	// Set small segment size to trigger rotation
 	opts.SegmentOptions.MaxSegmentSize = 100
 
-	q, err := Open(tmpDir, opts)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	defer q.Close()
+	q := setupQueue(t, opts)
 
 	// Enqueue enough messages to create multiple segments
 	for i := 0; i < 50; i++ {
@@ -179,10 +156,8 @@ func TestQueue_CompactionMetrics(t *testing.T) {
 	}
 
 	// Manually trigger compaction (should have no effect without retention policy)
-	_, err = q.Compact()
-	if err != nil {
-		t.Fatalf("Compact failed: %v", err)
-	}
+	_, err := q.Compact()
+	assertNoError(t, err)
 
 	// Check compaction metrics (may be 0 if nothing was compacted)
 	snapshot := collector.GetSnapshot()
@@ -194,25 +169,14 @@ func TestQueue_CompactionMetrics(t *testing.T) {
 }
 
 func TestQueue_NoopMetrics(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Use default options (NoopCollector)
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	defer q.Close()
+	q := setupQueue(t, nil)
 
 	// These operations should work fine with NoopCollector
-	_, err = q.Enqueue([]byte("test"))
-	if err != nil {
-		t.Fatalf("Enqueue failed: %v", err)
-	}
+	_, err := q.Enqueue([]byte("test"))
+	assertNoError(t, err)
 
 	_, err = q.Dequeue()
-	if err != nil {
-		t.Fatalf("Dequeue failed: %v", err)
-	}
+	assertNoError(t, err)
 }
 
 func TestQueue_MetricsWithTimestamp(t *testing.T) {
@@ -223,26 +187,17 @@ func TestQueue_MetricsWithTimestamp(t *testing.T) {
 	opts := DefaultOptions(tmpDir)
 	opts.MetricsCollector = collector
 
-	q, err := Open(tmpDir, opts)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	defer q.Close()
+	q := setupQueue(t, opts)
 
 	// Enqueue a message
-	_, err = q.Enqueue([]byte("test"))
-	if err != nil {
-		t.Fatalf("Enqueue failed: %v", err)
-	}
+	_, err := q.Enqueue([]byte("test"))
+	assertNoError(t, err)
 
 	// Small delay to ensure different timestamp
 	time.Sleep(10 * time.Millisecond)
 
 	// Seek by timestamp
-	err = q.SeekToTimestamp(time.Now().Add(-1 * time.Second).UnixNano())
-	if err != nil {
-		t.Fatalf("SeekToTimestamp failed: %v", err)
-	}
+	assertNoError(t, q.SeekToTimestamp(time.Now().Add(-1*time.Second).UnixNano()))
 
 	// Verify seek was recorded
 	snapshot := collector.GetSnapshot()

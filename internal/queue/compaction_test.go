@@ -22,19 +22,10 @@ func TestAutoCompaction(t *testing.T) {
 		MinSegments: 1,
 	}
 
-	q, err := Open(tmpDir, opts)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, opts)
 
 	// Write many messages to create multiple segments
-	for i := 0; i < 60; i++ {
-		payload := []byte("test message")
-		if _, err := q.Enqueue(payload); err != nil {
-			t.Fatalf("Enqueue(%d) error = %v", i, err)
-		}
-	}
+	enqueueN(t, q, 60)
 
 	initialSegmentCount := q.Stats().SegmentCount
 	t.Logf("Initial segment count: %d", initialSegmentCount)
@@ -57,9 +48,7 @@ func TestAutoCompaction(t *testing.T) {
 
 	// Manually trigger compaction (this is what background compaction would do)
 	compactResult, err := q.Compact()
-	if err != nil {
-		t.Fatalf("Compact() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	t.Logf("Compaction removed %d segments, freed %d bytes",
 		compactResult.SegmentsRemoved, compactResult.BytesFreed)
@@ -105,11 +94,7 @@ func TestCompactionDisabled(t *testing.T) {
 	opts.SegmentOptions.MaxSegmentMessages = 10
 	opts.SegmentOptions.RotationPolicy = segment.RotateByCount
 
-	q, err := Open(tmpDir, opts)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, opts)
 
 	// Check that compaction timer is not active
 	if q.compactionTimerActive {
@@ -117,11 +102,7 @@ func TestCompactionDisabled(t *testing.T) {
 	}
 
 	// Write messages to create multiple segments
-	for i := 0; i < 30; i++ {
-		if _, err := q.Enqueue([]byte("test")); err != nil {
-			t.Fatalf("Enqueue(%d) error = %v", i, err)
-		}
-	}
+	enqueueN(t, q, 30)
 
 	initialSegmentCount := q.Stats().SegmentCount
 
@@ -143,10 +124,7 @@ func TestCompactionTimerStopped(t *testing.T) {
 	opts := DefaultOptions(tmpDir)
 	opts.CompactionInterval = 100 * time.Millisecond
 
-	q, err := Open(tmpDir, opts)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	q := setupQueue(t, opts)
 
 	// Check that compaction timer is active
 	if !q.compactionTimerActive {
@@ -154,9 +132,7 @@ func TestCompactionTimerStopped(t *testing.T) {
 	}
 
 	// Close queue
-	if err := q.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
+	assertNoError(t, q.Close())
 
 	// Check that compaction timer is stopped
 	if q.compactionTimerActive {
@@ -177,26 +153,16 @@ func TestManualCompaction(t *testing.T) {
 		MinSegments: 1,
 	}
 
-	q, err := Open(tmpDir, opts)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, opts)
 
 	// Write messages to create multiple segments
-	for i := 0; i < 40; i++ {
-		if _, err := q.Enqueue([]byte("test")); err != nil {
-			t.Fatalf("Enqueue(%d) error = %v", i, err)
-		}
-	}
+	enqueueN(t, q, 40)
 
 	initialSegmentCount := q.Stats().SegmentCount
 
 	// Manually trigger compaction
 	result, err := q.Compact()
-	if err != nil {
-		t.Fatalf("Compact() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if result.SegmentsRemoved == 0 {
 		t.Error("Manual compaction removed 0 segments, expected some")

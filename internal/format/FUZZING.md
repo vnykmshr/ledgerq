@@ -22,11 +22,16 @@ go test -fuzz=FuzzCRC32 -fuzztime=30s ./internal/format
 ### Run all fuzz tests briefly
 
 ```bash
-# Test all fuzz functions for 10 seconds each
+# Test all fuzz functions for 10 seconds each (requires bash or compatible shell)
 for fuzz in FuzzEntry FuzzUnmarshal FuzzCRC32; do
     echo "Testing $fuzz..."
     go test -fuzz=$fuzz -fuzztime=10s ./internal/format
 done
+```
+
+Or use the Makefile target:
+```bash
+make fuzz
 ```
 
 ## What is Being Tested

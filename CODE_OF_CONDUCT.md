@@ -1,35 +1,37 @@
 # Code of Conduct
 
-## Our Standards
+## Our Commitment
 
-LedgerQ is committed to providing a welcoming and professional environment for all contributors.
+We are committed to providing a welcoming and professional environment for all contributors.
 
-### Expected Behavior
+## Expected Behavior
 
-- Be respectful and considerate in communication
-- Focus on constructive technical discussions
-- Accept feedback gracefully
-- Support other contributors
+- Be respectful and professional in all interactions
+- Provide constructive feedback
+- Accept differing viewpoints gracefully
+- Focus on technical merit and project goals
 
-### Unacceptable Behavior
+## Unacceptable Behavior
 
-- Harassment or discriminatory behavior
-- Disruptive or unprofessional conduct
-- Violation of privacy
-- Other conduct that would be inappropriate in a professional setting
+- Personal attacks or insults
+- Disruptive behavior that interferes with project work
+- Sharing private information without consent
+- Other unprofessional conduct
 
 ## Enforcement
 
-Project maintainers are responsible for clarifying standards and may take appropriate action in response to unacceptable behavior.
+Project maintainers have the right and responsibility to remove comments, commits, or contributions that do not align with this Code of Conduct.
 
 ## Reporting
 
-Issues can be reported by contacting the project maintainers. All reports will be reviewed and handled appropriately.
+To report issues, contact the project maintainers through GitHub issues or discussions.
+
+All reports will be reviewed and investigated promptly.
 
 ## Scope
 
-This Code of Conduct applies to all project spaces including code repositories, issue trackers, and communication channels.
+This Code of Conduct applies to all project spaces including code repositories, issue trackers, and discussions.
 
 ## Attribution
 
-This Code of Conduct is adapted from best practices in open source collaboration.
+This Code of Conduct is inspired by industry best practices for open source collaboration.

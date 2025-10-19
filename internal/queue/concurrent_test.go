@@ -8,13 +8,7 @@ import (
 )
 
 func TestConcurrentEnqueue(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Concurrent enqueuers
 	numGoroutines := 10
@@ -39,29 +33,16 @@ func TestConcurrentEnqueue(t *testing.T) {
 	wg.Wait()
 
 	// Verify all messages were written
-	stats := q.Stats()
 	expected := uint64(numGoroutines * messagesPerGoroutine)
-	if stats.TotalMessages != expected {
-		t.Errorf("TotalMessages = %d, want %d", stats.TotalMessages, expected)
-	}
+	assertStats(t, q, expected, expected)
 }
 
 func TestConcurrentDequeue(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue messages first
 	totalMessages := 1000
-	for i := 0; i < totalMessages; i++ {
-		if _, err := q.Enqueue([]byte(fmt.Sprintf("msg-%d", i))); err != nil {
-			t.Fatalf("Enqueue() error = %v", err)
-		}
-	}
+	enqueueN(t, q, totalMessages)
 
 	// Concurrent dequeuers
 	numGoroutines := 10
@@ -99,26 +80,25 @@ func TestConcurrentDequeue(t *testing.T) {
 }
 
 func TestConcurrentEnqueueDequeue(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Concurrent producers and consumers
 	numProducers := 5
 	numConsumers := 5
 	messagesPerProducer := 100
+	expectedTotal := numProducers * messagesPerProducer
 
 	var wg sync.WaitGroup
+	producerReady := make(chan struct{})
 
 	// Start producers
 	wg.Add(numProducers)
 	for p := 0; p < numProducers; p++ {
 		go func(id int) {
 			defer wg.Done()
+			if id == 0 {
+				close(producerReady) // Signal that at least one producer is ready
+			}
 			for i := 0; i < messagesPerProducer; i++ {
 				payload := []byte(fmt.Sprintf("producer-%d-msg-%d", id, i))
 				if _, err := q.Enqueue(payload); err != nil {
@@ -129,8 +109,8 @@ func TestConcurrentEnqueueDequeue(t *testing.T) {
 		}(p)
 	}
 
-	// Give producers a head start
-	time.Sleep(100 * time.Millisecond)
+	// Wait for producers to start, then start consumers
+	<-producerReady
 
 	// Start consumers
 	consumed := make(chan int, numConsumers)
@@ -142,18 +122,17 @@ func TestConcurrentEnqueueDequeue(t *testing.T) {
 			for {
 				_, err := q.Dequeue()
 				if err != nil {
-					// No more messages available
-					time.Sleep(10 * time.Millisecond)
-					// Try one more time
-					_, err := q.Dequeue()
-					if err != nil {
+					// Check if all messages have been produced
+					stats := q.Stats()
+					if stats.TotalMessages >= uint64(expectedTotal) && stats.PendingMessages == 0 {
 						consumed <- count
 						return
 					}
-					count++
-				} else {
-					count++
+					// Otherwise wait briefly for more messages
+					time.Sleep(10 * time.Millisecond)
+					continue
 				}
+				count++
 			}
 		}()
 	}
@@ -167,20 +146,13 @@ func TestConcurrentEnqueueDequeue(t *testing.T) {
 		totalConsumed += c
 	}
 
-	expectedTotal := numProducers * messagesPerProducer
 	if totalConsumed != expectedTotal {
 		t.Errorf("Consumed %d messages, want %d", totalConsumed, expectedTotal)
 	}
 }
 
 func TestConcurrentBatchOperations(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Concurrent batch enqueuers
 	numGoroutines := 10
@@ -209,29 +181,16 @@ func TestConcurrentBatchOperations(t *testing.T) {
 	wg.Wait()
 
 	// Verify total messages
-	stats := q.Stats()
 	expected := uint64(numGoroutines * batchesPerGoroutine * messagesPerBatch)
-	if stats.TotalMessages != expected {
-		t.Errorf("TotalMessages = %d, want %d", stats.TotalMessages, expected)
-	}
+	assertStats(t, q, expected, expected)
 }
 
 func TestConcurrentSeek(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue messages first
 	totalMessages := 1000
-	for i := 0; i < totalMessages; i++ {
-		if _, err := q.Enqueue([]byte(fmt.Sprintf("msg-%d", i))); err != nil {
-			t.Fatalf("Enqueue() error = %v", err)
-		}
-	}
+	enqueueN(t, q, totalMessages)
 
 	// Concurrent seekers and readers
 	numGoroutines := 10
@@ -262,22 +221,20 @@ func TestConcurrentSeek(t *testing.T) {
 }
 
 func TestConcurrentMixedOperations(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Run mixed operations concurrently
 	var wg sync.WaitGroup
+	ready := make(chan struct{})
 
 	// Enqueuers
 	wg.Add(3)
 	for i := 0; i < 3; i++ {
 		go func(id int) {
 			defer wg.Done()
+			if id == 0 {
+				close(ready) // Signal ready
+			}
 			for j := 0; j < 100; j++ {
 				_, _ = q.Enqueue([]byte(fmt.Sprintf("enq-%d-%d", id, j)))
 			}
@@ -299,8 +256,8 @@ func TestConcurrentMixedOperations(t *testing.T) {
 		}(i)
 	}
 
-	// Give enqueuers a head start
-	time.Sleep(100 * time.Millisecond)
+	// Wait for enqueuers to start
+	<-ready
 
 	// Dequeuers
 	wg.Add(2)
@@ -309,7 +266,7 @@ func TestConcurrentMixedOperations(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 50; j++ {
 				_, _ = q.Dequeue()
-				time.Sleep(time.Millisecond)
+				time.Sleep(time.Millisecond) // Rate limiting, not synchronization
 			}
 		}()
 	}
@@ -321,7 +278,7 @@ func TestConcurrentMixedOperations(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
 				_ = q.SeekToMessageID(1)
-				time.Sleep(10 * time.Millisecond)
+				time.Sleep(10 * time.Millisecond) // Rate limiting, not synchronization
 			}
 		}()
 	}
@@ -333,7 +290,7 @@ func TestConcurrentMixedOperations(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 50; j++ {
 				_ = q.Stats()
-				time.Sleep(time.Millisecond)
+				time.Sleep(time.Millisecond) // Rate limiting, not synchronization
 			}
 		}()
 	}
@@ -344,13 +301,7 @@ func TestConcurrentMixedOperations(t *testing.T) {
 }
 
 func TestConcurrentSync(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	var wg sync.WaitGroup
 
@@ -372,7 +323,7 @@ func TestConcurrentSync(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 20; j++ {
 				_ = q.Sync()
-				time.Sleep(5 * time.Millisecond)
+				time.Sleep(5 * time.Millisecond) // Rate limiting, not synchronization
 			}
 		}()
 	}

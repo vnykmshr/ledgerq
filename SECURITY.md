@@ -2,14 +2,13 @@
 
 ## Supported Versions
 
-LedgerQ is currently in pre-v1.0 development. Security updates will be provided for the latest development version.
+We maintain security updates for the latest minor version series.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| main    | :white_check_mark: |
+| 1.1.x   | :white_check_mark: |
+| 1.0.x   | :white_check_mark: |
 | < 1.0   | :x:                |
-
-Once v1.0 is released, we will maintain security updates for the latest minor version.
 
 ## Reporting a Vulnerability
 
@@ -18,7 +17,7 @@ We take security issues seriously. If you discover a security vulnerability, ple
 ### How to Report
 
 1. **Do NOT** open a public GitHub issue for security vulnerabilities
-2. Email the maintainers directly at: (to be added when repository is public)
+2. Use GitHub Security Advisories: https://github.com/vnykmshr/ledgerq/security/advisories/new
 3. Provide detailed information about the vulnerability:
    - Description of the vulnerability
    - Steps to reproduce
@@ -39,11 +38,13 @@ We take security issues seriously. If you discover a security vulnerability, ple
 
 When using LedgerQ:
 
-1. **File Permissions**: Ensure queue directories have appropriate file permissions
+1. **File Permissions**: Queue files are created with 0644 permissions (world-readable). Place queue directories in protected locations with restrictive parent directory permissions (e.g., 0700). See [USAGE.md](docs/USAGE.md#security) for examples.
 2. **Data Validation**: Validate and sanitize all data before enqueueing
 3. **Resource Limits**: Set appropriate limits on queue size and message size
 4. **Access Control**: Restrict access to queue directories to authorized processes only
 5. **Monitoring**: Monitor queue statistics for unusual activity
+
+For a complete security analysis including audit findings and tool results, see [SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md).
 
 ### Scope
 

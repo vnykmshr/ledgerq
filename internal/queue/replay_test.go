@@ -7,26 +7,13 @@ import (
 )
 
 func TestSeekToMessageID(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue 10 messages
-	for i := 0; i < 10; i++ {
-		payload := []byte(fmt.Sprintf("message %d", i+1))
-		if _, err := q.Enqueue(payload); err != nil {
-			t.Fatalf("Enqueue() error = %v", err)
-		}
-	}
+	enqueueN(t, q, 10)
 
 	// Seek to message ID 5
-	if err := q.SeekToMessageID(5); err != nil {
-		t.Fatalf("SeekToMessageID(5) error = %v", err)
-	}
+	assertNoError(t, q.SeekToMessageID(5))
 
 	// Dequeue should return message 5
 	msg, err := q.Dequeue()
@@ -38,8 +25,8 @@ func TestSeekToMessageID(t *testing.T) {
 		t.Errorf("Dequeue() after SeekToMessageID(5) returned ID %d, want 5", msg.ID)
 	}
 
-	if string(msg.Payload) != "message 5" {
-		t.Errorf("Dequeue() after SeekToMessageID(5) returned payload %s, want 'message 5'", msg.Payload)
+	if string(msg.Payload) != "msg-4" {
+		t.Errorf("Dequeue() after SeekToMessageID(5) returned payload %s, want 'msg-4'", msg.Payload)
 	}
 
 	// Next dequeue should return message 6
@@ -54,13 +41,7 @@ func TestSeekToMessageID(t *testing.T) {
 }
 
 func TestSeekToMessageID_Beginning(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue messages
 	for i := 0; i < 5; i++ {
@@ -77,9 +58,7 @@ func TestSeekToMessageID_Beginning(t *testing.T) {
 	}
 
 	// Seek back to the beginning
-	if err := q.SeekToMessageID(1); err != nil {
-		t.Fatalf("SeekToMessageID(1) error = %v", err)
-	}
+	assertNoError(t, q.SeekToMessageID(1))
 
 	// Should be able to re-read from the start
 	msg, err := q.Dequeue()
@@ -93,13 +72,7 @@ func TestSeekToMessageID_Beginning(t *testing.T) {
 }
 
 func TestSeekToMessageID_InvalidID(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue 5 messages
 	for i := 0; i < 5; i++ {
@@ -109,7 +82,7 @@ func TestSeekToMessageID_InvalidID(t *testing.T) {
 	}
 
 	// Try to seek to ID 0 (invalid)
-	err = q.SeekToMessageID(0)
+	err := q.SeekToMessageID(0)
 	if err == nil {
 		t.Error("SeekToMessageID(0) should fail")
 	}
@@ -124,21 +97,14 @@ func TestSeekToMessageID_InvalidID(t *testing.T) {
 func TestSeekToMessageID_AfterClose(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	q := setupQueue(t, DefaultOptions(tmpDir))
 
-	if _, err := q.Enqueue([]byte("test")); err != nil {
-		t.Fatalf("Enqueue() error = %v", err)
-	}
+	enqueueN(t, q, 1)
 
-	if err := q.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
+	assertNoError(t, q.Close())
 
 	// Try to seek after close
-	err = q.SeekToMessageID(1)
+	err := q.SeekToMessageID(1)
 	if err == nil {
 		t.Error("SeekToMessageID() after Close() should fail")
 	}
@@ -148,10 +114,7 @@ func TestSeekToMessageID_Persistence(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// First session: enqueue messages
-	q1, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() first error = %v", err)
-	}
+	q1 := setupQueue(t, DefaultOptions(tmpDir))
 
 	for i := 0; i < 10; i++ {
 		if _, err := q1.Enqueue([]byte(fmt.Sprintf("msg%d", i+1))); err != nil {
@@ -159,16 +122,10 @@ func TestSeekToMessageID_Persistence(t *testing.T) {
 		}
 	}
 
-	if err := q1.Close(); err != nil {
-		t.Fatalf("Close() first error = %v", err)
-	}
+	assertNoError(t, q1.Close())
 
 	// Second session: seek and read
-	q2, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() second error = %v", err)
-	}
-	defer func() { _ = q2.Close() }()
+	q2 := setupQueue(t, DefaultOptions(tmpDir))
 
 	// Seek to message 7
 	if err := q2.SeekToMessageID(7); err != nil {
@@ -191,25 +148,13 @@ func TestSeekToMessageID_Persistence(t *testing.T) {
 }
 
 func TestSeekToMessageID_WithBatch(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue 20 messages
-	for i := 0; i < 20; i++ {
-		if _, err := q.Enqueue([]byte(fmt.Sprintf("msg%d", i+1))); err != nil {
-			t.Fatalf("Enqueue() error = %v", err)
-		}
-	}
+	enqueueN(t, q, 20)
 
 	// Seek to message 10
-	if err := q.SeekToMessageID(10); err != nil {
-		t.Fatalf("SeekToMessageID(10) error = %v", err)
-	}
+	assertNoError(t, q.SeekToMessageID(10))
 
 	// Dequeue batch should start from message 10
 	messages, err := q.DequeueBatch(5)
@@ -231,13 +176,7 @@ func TestSeekToMessageID_WithBatch(t *testing.T) {
 }
 
 func TestSeekToMessageID_MultipleSeeks(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue 10 messages
 	for i := 0; i < 10; i++ {
@@ -247,9 +186,7 @@ func TestSeekToMessageID_MultipleSeeks(t *testing.T) {
 	}
 
 	// Seek to 5, read one
-	if err := q.SeekToMessageID(5); err != nil {
-		t.Fatalf("SeekToMessageID(5) error = %v", err)
-	}
+	assertNoError(t, q.SeekToMessageID(5))
 
 	msg, err := q.Dequeue()
 	if err != nil {
@@ -260,9 +197,7 @@ func TestSeekToMessageID_MultipleSeeks(t *testing.T) {
 	}
 
 	// Seek to 2 (backward)
-	if err := q.SeekToMessageID(2); err != nil {
-		t.Fatalf("SeekToMessageID(2) error = %v", err)
-	}
+	assertNoError(t, q.SeekToMessageID(2))
 
 	msg, err = q.Dequeue()
 	if err != nil {
@@ -273,9 +208,7 @@ func TestSeekToMessageID_MultipleSeeks(t *testing.T) {
 	}
 
 	// Seek to 8 (forward)
-	if err := q.SeekToMessageID(8); err != nil {
-		t.Fatalf("SeekToMessageID(8) error = %v", err)
-	}
+	assertNoError(t, q.SeekToMessageID(8))
 
 	msg, err = q.Dequeue()
 	if err != nil {
@@ -287,13 +220,7 @@ func TestSeekToMessageID_MultipleSeeks(t *testing.T) {
 }
 
 func TestSeekToTimestamp(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue messages with different timestamps
 	timestamps := make([]int64, 5)
@@ -322,13 +249,7 @@ func TestSeekToTimestamp(t *testing.T) {
 }
 
 func TestSeekToTimestamp_BeforeAll(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Record time before enqueuing
 	beforeTime := time.Now().UnixNano()
@@ -358,13 +279,7 @@ func TestSeekToTimestamp_BeforeAll(t *testing.T) {
 }
 
 func TestSeekToTimestamp_AfterAll(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue messages
 	for i := 0; i < 5; i++ {
@@ -378,7 +293,7 @@ func TestSeekToTimestamp_AfterAll(t *testing.T) {
 	afterTime := time.Now().UnixNano()
 
 	// Seek to after all messages
-	err = q.SeekToTimestamp(afterTime)
+	err := q.SeekToTimestamp(afterTime)
 	if err == nil {
 		t.Error("SeekToTimestamp(afterTime) should fail when no messages after timestamp")
 	}
@@ -387,34 +302,21 @@ func TestSeekToTimestamp_AfterAll(t *testing.T) {
 func TestSeekToTimestamp_AfterClose(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	q := setupQueue(t, DefaultOptions(tmpDir))
 
-	if _, err := q.Enqueue([]byte("test")); err != nil {
-		t.Fatalf("Enqueue() error = %v", err)
-	}
+	enqueueN(t, q, 1)
 
-	if err := q.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
+	assertNoError(t, q.Close())
 
 	// Try to seek after close
-	err = q.SeekToTimestamp(time.Now().UnixNano())
+	err := q.SeekToTimestamp(time.Now().UnixNano())
 	if err == nil {
 		t.Error("SeekToTimestamp() after Close() should fail")
 	}
 }
 
 func TestSeekToTimestamp_WithBatch(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue messages with timestamps
 	timestamps := make([]int64, 10)

@@ -97,7 +97,7 @@ make build
 
 We use several tools to maintain code quality:
 
-- **golangci-lint** — Comprehensive linting (configured in `.golangci.yaml`)
+- **golangci-lint** — Comprehensive linting (configured in `.golangci.yml`)
 - **gofmt** — Code formatting
 - **goimports** — Import organization
 - **go vet** — Static analysis

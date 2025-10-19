@@ -408,7 +408,7 @@ func TestMetadataFile_ConcurrentWrites(t *testing.T) {
 				t.Errorf("Write() error = %v", err)
 			}
 			done <- true
-		}(uint64((i+1) * 100)) //nolint:gosec // G115: Test code, safe conversion
+		}(uint64((i + 1) * 100)) //nolint:gosec // G115: Test code, safe conversion
 	}
 
 	// Wait for all writes

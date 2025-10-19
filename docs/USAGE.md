@@ -19,7 +19,7 @@ Complete reference for using LedgerQ.
 ## Installation
 
 ```bash
-go get github.com/vnykmshr/ledgerq
+go get github.com/vnykmshr/ledgerq/pkg/ledgerq@latest
 ```
 
 Import in your code:
@@ -318,31 +318,36 @@ fmt.Printf("Pending Messages: %d\n", snapshot.PendingMessages)
 
 ### Logging
 
-**Use default logger**:
-```go
-import "github.com/vnykmshr/ledgerq/internal/logging"
-
-opts.Logger = logging.NewDefaultLogger(logging.LevelInfo)
-```
-
 **Implement custom logger**:
+
+LedgerQ does not export a default logger implementation. To enable logging, implement the `Logger` interface:
 ```go
-type MyLogger struct{}
-
-func (l MyLogger) Debug(msg string, fields ...ledgerq.LogField) {
-    // Your debug logging
-}
-func (l MyLogger) Info(msg string, fields ...ledgerq.LogField) {
-    // Your info logging
-}
-func (l MyLogger) Warn(msg string, fields ...ledgerq.LogField) {
-    // Your warning logging
-}
-func (l MyLogger) Error(msg string, fields ...ledgerq.LogField) {
-    // Your error logging
+// Logger interface that must be implemented
+type Logger interface {
+    Debug(msg string, fields ...LogField)
+    Info(msg string, fields ...LogField)
+    Warn(msg string, fields ...LogField)
+    Error(msg string, fields ...LogField)
 }
 
-opts.Logger = MyLogger{}
+// Example implementation using standard log package
+type SimpleLogger struct{}
+
+func (l *SimpleLogger) Debug(msg string, fields ...ledgerq.LogField) {
+    log.Printf("[DEBUG] %s %v", msg, fields)
+}
+func (l *SimpleLogger) Info(msg string, fields ...ledgerq.LogField) {
+    log.Printf("[INFO] %s %v", msg, fields)
+}
+func (l *SimpleLogger) Warn(msg string, fields ...ledgerq.LogField) {
+    log.Printf("[WARN] %s %v", msg, fields)
+}
+func (l *SimpleLogger) Error(msg string, fields ...ledgerq.LogField) {
+    log.Printf("[ERROR] %s %v", msg, fields)
+}
+
+// Use custom logger
+opts.Logger = &SimpleLogger{}
 ```
 
 ### Manual Compaction
@@ -457,31 +462,27 @@ ledgerq version
 
 ### Security
 
-1. **File permissions**
-   - Queue data files are created with 0644 permissions (user rw, group/other read)
-   - Segment files (.log) and index files (.idx) are world-readable by default
-   - Metadata files use the same 0644 permissions
+**File Permissions**: Queue data files are created with 0644 permissions (world-readable). For sensitive data, restrict access using parent directory permissions:
 
-2. **Protecting sensitive data**
-   - Place queue directories in protected locations with restrictive parent directory permissions
-   - Use OS-level access controls (e.g., 0700 on parent directory)
-   - Consider application-level encryption for sensitive payloads before enqueuing
-   - Queue directories should not be placed in web-accessible locations
+```go
+// Create queue in user-only directory
+queueDir := "/var/app/queues/sensitive"
+if err := os.MkdirAll(queueDir, 0700); err != nil {
+    log.Fatal(err)
+}
+q, err := ledgerq.Open(queueDir, nil)
+```
 
-3. **Example: Secure queue location**
-   ```go
-   // Create queue in user-only directory
-   queueDir := "/var/app/queues/sensitive"
-   if err := os.MkdirAll(queueDir, 0700); err != nil {
-       log.Fatal(err)
-   }
-   q, err := ledgerq.Open(queueDir, nil)
-   ```
+**Additional Security Considerations**:
+- Validate and sanitize data before enqueueing
+- Consider application-level encryption for sensitive payloads
+- Avoid placing queue directories in web-accessible locations
+- Use dedicated service accounts on multi-user systems
+- Monitor queue statistics for unusual activity
 
-4. **Multi-user systems**
-   - Queue data is readable by other users with file system access
-   - Use appropriate user/group permissions on queue directories
-   - Consider dedicated service accounts for queue operations
+For complete security policy and audit results, see:
+- [SECURITY.md](../SECURITY.md) - Vulnerability reporting and security policy
+- [SECURITY_AUDIT.md](SECURITY_AUDIT.md) - Detailed security audit findings
 
 ## Troubleshooting
 

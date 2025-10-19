@@ -37,7 +37,21 @@ import (
 
 // Version is the current version of LedgerQ.
 // This is the single source of truth for the application version.
-const Version = "1.0.0"
+const Version = "1.1.0"
+
+// Priority represents the priority level of a message.
+type Priority uint8
+
+const (
+	// PriorityLow is the default priority level (FIFO behavior).
+	PriorityLow Priority = 0
+
+	// PriorityMedium gives messages higher precedence than low priority.
+	PriorityMedium Priority = 1
+
+	// PriorityHigh gives messages the highest precedence.
+	PriorityHigh Priority = 2
+)
 
 // Queue represents a persistent message queue.
 type Queue struct {
@@ -60,6 +74,9 @@ type Message struct {
 
 	// ExpiresAt is when the message expires (Unix nanoseconds), 0 if no TTL
 	ExpiresAt int64
+
+	// Priority is the message priority level (v1.1.0+)
+	Priority Priority
 
 	// Headers contains key-value metadata for the message
 	Headers map[string]string
@@ -96,6 +113,17 @@ type Options struct {
 	// Default: nil (no automatic cleanup)
 	RetentionPolicy *RetentionPolicy
 
+	// EnablePriorities enables priority queue mode (v1.1.0+)
+	// When disabled, all messages are treated as PriorityLow (FIFO behavior)
+	// Default: false
+	EnablePriorities bool
+
+	// PriorityStarvationWindow prevents low-priority message starvation (v1.1.0+)
+	// Low-priority messages waiting longer than this duration will be promoted
+	// Set to 0 to disable starvation prevention
+	// Default: 30 seconds
+	PriorityStarvationWindow time.Duration
+
 	// Logger for structured logging (nil = no logging)
 	// Default: no logging
 	Logger Logger
@@ -103,6 +131,22 @@ type Options struct {
 	// MetricsCollector for collecting queue metrics (nil = no metrics)
 	// Default: no metrics
 	MetricsCollector MetricsCollector
+}
+
+// EnqueueOptions contains options for enqueuing a message with all features.
+type EnqueueOptions struct {
+	// Priority is the message priority level (v1.1.0+)
+	// Default: PriorityLow
+	Priority Priority
+
+	// TTL is the time-to-live duration for the message
+	// Set to 0 for no expiration
+	// Default: 0 (no expiration)
+	TTL time.Duration
+
+	// Headers contains key-value metadata for the message
+	// Default: nil
+	Headers map[string]string
 }
 
 // MetricsCollector defines the interface for recording queue metrics.
@@ -209,15 +253,17 @@ func GetMetricsSnapshot(collector MetricsCollector) *MetricsSnapshot {
 // DefaultOptions returns sensible defaults for queue configuration.
 func DefaultOptions(dir string) *Options {
 	return &Options{
-		AutoSync:           false,
-		SyncInterval:       1 * time.Second,
-		CompactionInterval: 0,                  // Disabled by default
-		MaxSegmentSize:     1024 * 1024 * 1024, // 1GB
-		MaxSegmentMessages: 0,                  // Unlimited
-		RotationPolicy:     RotateBySize,
-		RetentionPolicy:    nil, // No retention
-		Logger:             nil, // No logging
-		MetricsCollector:   nil, // No metrics
+		AutoSync:                 false,
+		SyncInterval:             1 * time.Second,
+		CompactionInterval:       0,                  // Disabled by default
+		MaxSegmentSize:           1024 * 1024 * 1024, // 1GB
+		MaxSegmentMessages:       0,                  // Unlimited
+		RotationPolicy:           RotateBySize,
+		RetentionPolicy:          nil,              // No retention
+		EnablePriorities:         false,            // FIFO mode by default
+		PriorityStarvationWindow: 30 * time.Second, // 30 seconds
+		Logger:                   nil,              // No logging
+		MetricsCollector:         nil,              // No metrics
 	}
 }
 
@@ -234,12 +280,14 @@ func Open(dir string, opts *Options) (*Queue, error) {
 		}
 
 		qopts = &queue.Options{
-			SegmentOptions:     convertSegmentOptions(dir, opts),
-			AutoSync:           opts.AutoSync,
-			SyncInterval:       opts.SyncInterval,
-			CompactionInterval: opts.CompactionInterval,
-			Logger:             convertLogger(opts.Logger),
-			MetricsCollector:   metricsCollector,
+			SegmentOptions:           convertSegmentOptions(dir, opts),
+			AutoSync:                 opts.AutoSync,
+			SyncInterval:             opts.SyncInterval,
+			CompactionInterval:       opts.CompactionInterval,
+			EnablePriorities:         opts.EnablePriorities,
+			PriorityStarvationWindow: opts.PriorityStarvationWindow,
+			Logger:                   convertLogger(opts.Logger),
+			MetricsCollector:         metricsCollector,
 		}
 	}
 
@@ -278,16 +326,72 @@ func (q *Queue) EnqueueWithOptions(payload []byte, ttl time.Duration, headers ma
 	return q.q.EnqueueWithOptions(payload, ttl, headers)
 }
 
+// EnqueueWithPriority appends a message with a specific priority level (v1.1.0+).
+// Priority determines the order in which messages are dequeued when EnablePriorities is true.
+// When EnablePriorities is false, priority is ignored and FIFO order is maintained.
+// Returns the offset where the message was written.
+func (q *Queue) EnqueueWithPriority(payload []byte, priority Priority) (uint64, error) {
+	return q.q.EnqueueWithPriority(payload, uint8(priority))
+}
+
+// EnqueueWithAllOptions appends a message with priority, TTL, and headers (v1.1.0+).
+// This is the most flexible enqueue method, combining all available features.
+// Returns the offset where the message was written.
+func (q *Queue) EnqueueWithAllOptions(payload []byte, opts EnqueueOptions) (uint64, error) {
+	return q.q.EnqueueWithAllOptions(payload, uint8(opts.Priority), opts.TTL, opts.Headers)
+}
+
 // EnqueueBatch appends multiple messages to the queue in a single operation.
 // This is more efficient than calling Enqueue() multiple times.
 // Returns the offsets where the messages were written.
+// Note: All messages in the batch have default priority (PriorityLow).
+// Use EnqueueBatchWithOptions for priority support.
 func (q *Queue) EnqueueBatch(payloads [][]byte) ([]uint64, error) {
 	return q.q.EnqueueBatch(payloads)
+}
+
+// BatchEnqueueOptions contains options for enqueueing a single message in a batch operation (v1.1.0+).
+type BatchEnqueueOptions struct {
+	// Payload is the message data
+	Payload []byte
+
+	// Priority is the message priority level
+	// Default: PriorityLow (0)
+	Priority Priority
+
+	// TTL is the time-to-live duration for the message
+	// Set to 0 for no expiration
+	// Default: 0 (no expiration)
+	TTL time.Duration
+
+	// Headers contains key-value metadata for the message
+	// Default: nil
+	Headers map[string]string
+}
+
+// EnqueueBatchWithOptions appends multiple messages with individual options to the queue (v1.1.0+).
+// This is more efficient than calling EnqueueWithAllOptions() multiple times as it performs
+// a single fsync for all messages. Each message can have different priority, TTL, and headers.
+// Returns the offsets where the messages were written.
+func (q *Queue) EnqueueBatchWithOptions(messages []BatchEnqueueOptions) ([]uint64, error) {
+	// Convert public options to internal options
+	internalMessages := make([]queue.BatchEnqueueOptions, len(messages))
+	for i, msg := range messages {
+		internalMessages[i] = queue.BatchEnqueueOptions{
+			Payload:  msg.Payload,
+			Priority: uint8(msg.Priority),
+			TTL:      msg.TTL,
+			Headers:  msg.Headers,
+		}
+	}
+
+	return q.q.EnqueueBatchWithOptions(internalMessages)
 }
 
 // Dequeue retrieves the next message from the queue.
 // Returns an error if no messages are available.
 // Automatically skips expired messages with TTL.
+// When EnablePriorities is true, returns the highest priority message first.
 func (q *Queue) Dequeue() (*Message, error) {
 	msg, err := q.q.Dequeue()
 	if err != nil {
@@ -300,6 +404,7 @@ func (q *Queue) Dequeue() (*Message, error) {
 		Payload:   msg.Payload,
 		Timestamp: msg.Timestamp,
 		ExpiresAt: msg.ExpiresAt,
+		Priority:  Priority(msg.Priority),
 		Headers:   msg.Headers,
 	}, nil
 }
@@ -307,6 +412,11 @@ func (q *Queue) Dequeue() (*Message, error) {
 // DequeueBatch retrieves up to maxMessages from the queue in a single operation.
 // Returns fewer messages if the queue has fewer than maxMessages available.
 // Automatically skips expired messages with TTL.
+//
+// Note: DequeueBatch always returns messages in FIFO order (by message ID), even when
+// EnablePriorities is true. For priority-aware consumption, use Dequeue() in a loop or
+// the Stream() API. This is a performance trade-off: batch dequeue optimizes for
+// sequential I/O rather than priority ordering.
 func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 	msgs, err := q.q.DequeueBatch(maxMessages)
 	if err != nil {
@@ -321,6 +431,7 @@ func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 			Payload:   msg.Payload,
 			Timestamp: msg.Timestamp,
 			ExpiresAt: msg.ExpiresAt,
+			Priority:  Priority(msg.Priority),
 			Headers:   msg.Headers,
 		}
 	}
@@ -408,6 +519,7 @@ func (q *Queue) Stream(ctx context.Context, handler StreamHandler) error {
 			Payload:   msg.Payload,
 			Timestamp: msg.Timestamp,
 			ExpiresAt: msg.ExpiresAt,
+			Priority:  Priority(msg.Priority),
 			Headers:   msg.Headers,
 		})
 	}

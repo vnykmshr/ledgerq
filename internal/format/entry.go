@@ -20,6 +20,14 @@ const (
 	EntryFlagEncrypted  uint8 = 1 << 1 // Payload is encrypted
 	EntryFlagTTL        uint8 = 1 << 2 // Entry has TTL (expiration time)
 	EntryFlagHeaders    uint8 = 1 << 3 // Entry has headers (metadata)
+	EntryFlagPriority   uint8 = 1 << 4 // Entry has priority (v1.1.0+)
+)
+
+// Priority levels for messages (v1.1.0+)
+const (
+	PriorityLow    uint8 = 0 // Default for backward compatibility
+	PriorityMedium uint8 = 1
+	PriorityHigh   uint8 = 2
 )
 
 // EntryHeaderSize is the size of the entry header in bytes (22 bytes).
@@ -30,9 +38,10 @@ const EntryHeaderSize = 22
 //
 // Binary format (little-endian):
 //
-//	[Length:4][Type:1][Flags:1][MsgID:8][Timestamp:8][ExpiresAt:8?][HeadersSize:2?][Headers:N?][Payload:N][CRC32C:4]
+//	[Length:4][Type:1][Flags:1][MsgID:8][Timestamp:8][Priority:1?][ExpiresAt:8?][HeadersSize:2?][Headers:N?][Payload:N][CRC32C:4]
 //
 // Optional fields (included based on flags):
+//   - Priority (1 byte): Present if EntryFlagPriority is set (v1.1.0+)
 //   - ExpiresAt (8 bytes): Present if EntryFlagTTL is set
 //   - HeadersSize (2 bytes) + Headers (N bytes): Present if EntryFlagHeaders is set
 //
@@ -40,7 +49,7 @@ const EntryHeaderSize = 22
 //
 //	[NumHeaders:2][Key1Len:2][Key1:N][Value1Len:2][Value1:N]...[KeyNLen:2][KeyN:N][ValueNLen:2][ValueN:N]
 //
-// Total header size: 22 bytes (base) + 8 (TTL) + 2+N (Headers)
+// Total header size: 22 bytes (base) + 1 (Priority) + 8 (TTL) + 2+N (Headers)
 type Entry struct {
 	// Length is the total size of the entry including header and CRC (excludes the length field itself)
 	Length uint32
@@ -48,7 +57,7 @@ type Entry struct {
 	// Type indicates the entry type (Data, Tombstone, Checkpoint)
 	Type uint8
 
-	// Flags contains entry flags (compressed, encrypted, TTL, headers, etc.)
+	// Flags contains entry flags (compressed, encrypted, TTL, headers, priority, etc.)
 	Flags uint8
 
 	// MsgID is the unique message identifier
@@ -56,6 +65,11 @@ type Entry struct {
 
 	// Timestamp is the Unix time in nanoseconds when the entry was created
 	Timestamp int64
+
+	// Priority is the message priority level (Low/Medium/High) (v1.1.0+)
+	// Only serialized if EntryFlagPriority is set
+	// Defaults to PriorityLow for backward compatibility
+	Priority uint8
 
 	// ExpiresAt is the Unix time in nanoseconds when the message expires (0 = no expiration)
 	// Only serialized if EntryFlagTTL is set
@@ -157,6 +171,11 @@ func decodeHeaders(data []byte) (map[string]string, int, error) {
 // Marshal encodes the entry into binary format with CRC32C checksum.
 // Returns the complete entry bytes ready to be written to disk.
 func (e *Entry) Marshal() []byte {
+	// Set Priority flag if priority is non-default (not Low)
+	if e.Priority != PriorityLow {
+		e.Flags |= EntryFlagPriority
+	}
+
 	// Set TTL flag if ExpiresAt is specified
 	if e.ExpiresAt > 0 {
 		e.Flags |= EntryFlagTTL
@@ -169,6 +188,9 @@ func (e *Entry) Marshal() []byte {
 
 	// Calculate total length including optional fields
 	headerSize := EntryHeaderSize
+	if e.Flags&EntryFlagPriority != 0 {
+		headerSize += 1 // Add 1 byte for Priority
+	}
 	if e.Flags&EntryFlagTTL != 0 {
 		headerSize += 8 // Add 8 bytes for ExpiresAt
 	}
@@ -199,6 +221,12 @@ func (e *Entry) Marshal() []byte {
 	offset += 8
 	binary.LittleEndian.PutUint64(buf[offset:], uint64(e.Timestamp)) //nolint:gosec // G115: Safe uint64 conversion
 	offset += 8
+
+	// Write Priority if flag is set
+	if e.Flags&EntryFlagPriority != 0 {
+		buf[offset] = e.Priority
+		offset++
+	}
 
 	// Write ExpiresAt if TTL flag is set
 	if e.Flags&EntryFlagTTL != 0 {
@@ -261,12 +289,27 @@ func Unmarshal(r io.Reader) (*Entry, error) {
 		Flags:     buf[5],
 		MsgID:     binary.LittleEndian.Uint64(buf[6:14]),
 		Timestamp: int64(binary.LittleEndian.Uint64(buf[14:22])), //nolint:gosec // G115: Safe int64 conversion
+		Priority:  PriorityLow,                                   // Default for backward compatibility
+	}
+
+	// Parse Priority if flag is set
+	offset := 22 // Start after base header
+	if entry.Flags&EntryFlagPriority != 0 {
+		if len(buf) < 23+4 { // Min size with Priority
+			return nil, fmt.Errorf("entry has Priority flag but insufficient data")
+		}
+		entry.Priority = buf[offset]
+		offset++
 	}
 
 	// Parse ExpiresAt if TTL flag is set
-	offset := 22 // Start after base header
 	if entry.Flags&EntryFlagTTL != 0 {
-		if len(buf) < 30+4 { // Min size with TTL
+		minSize := 22 + 4 // base header + CRC
+		if entry.Flags&EntryFlagPriority != 0 {
+			minSize++ // Add Priority byte
+		}
+		minSize += 8 // Add ExpiresAt
+		if len(buf) < minSize {
 			return nil, fmt.Errorf("entry has TTL flag but insufficient data")
 		}
 		entry.ExpiresAt = int64(binary.LittleEndian.Uint64(buf[offset : offset+8])) //nolint:gosec // G115: Safe int64 conversion
@@ -311,8 +354,18 @@ func (e *Entry) Validate() error {
 		return fmt.Errorf("invalid timestamp: %d", e.Timestamp)
 	}
 
+	// Validate Priority if flag is set
+	if e.Flags&EntryFlagPriority != 0 {
+		if e.Priority > PriorityHigh {
+			return fmt.Errorf("invalid priority value: %d", e.Priority)
+		}
+	}
+
 	// Calculate expected length based on flags
 	headerSize := EntryHeaderSize
+	if e.Flags&EntryFlagPriority != 0 {
+		headerSize += 1
+	}
 	if e.Flags&EntryFlagTTL != 0 {
 		headerSize += 8
 		// Validate ExpiresAt if TTL flag is set

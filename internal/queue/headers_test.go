@@ -6,13 +6,7 @@ import (
 
 // TestEnqueueWithHeaders tests basic headers functionality
 func TestEnqueueWithHeaders(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue with headers
 	headers := map[string]string{
@@ -22,9 +16,7 @@ func TestEnqueueWithHeaders(t *testing.T) {
 	}
 	payload := []byte("test message with headers")
 	offset, err := q.EnqueueWithHeaders(payload, headers)
-	if err != nil {
-		t.Fatalf("EnqueueWithHeaders() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if offset == 0 {
 		t.Error("EnqueueWithHeaders() offset = 0, want > 0")
@@ -32,9 +24,7 @@ func TestEnqueueWithHeaders(t *testing.T) {
 
 	// Dequeue and verify headers
 	msg, err := q.Dequeue()
-	if err != nil {
-		t.Fatalf("Dequeue() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if string(msg.Payload) != string(payload) {
 		t.Errorf("Payload = %s, want %s", msg.Payload, payload)
@@ -53,13 +43,7 @@ func TestEnqueueWithHeaders(t *testing.T) {
 
 // TestEnqueueWithOptions tests combined TTL and headers
 func TestEnqueueWithOptions(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue with both TTL and headers
 	headers := map[string]string{
@@ -68,9 +52,7 @@ func TestEnqueueWithOptions(t *testing.T) {
 	}
 	payload := []byte("message with TTL and headers")
 	offset, err := q.EnqueueWithOptions(payload, 5*1000*1000*1000, headers) // 5 seconds
-	if err != nil {
-		t.Fatalf("EnqueueWithOptions() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if offset == 0 {
 		t.Error("EnqueueWithOptions() offset = 0, want > 0")
@@ -78,9 +60,7 @@ func TestEnqueueWithOptions(t *testing.T) {
 
 	// Dequeue immediately (before expiration)
 	msg, err := q.Dequeue()
-	if err != nil {
-		t.Fatalf("Dequeue() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if string(msg.Payload) != string(payload) {
 		t.Errorf("Payload = %s, want %s", msg.Payload, payload)
@@ -105,21 +85,13 @@ func TestEnqueueWithOptions(t *testing.T) {
 
 // TestHeaders_EmptyMap tests that empty headers work correctly
 func TestHeaders_EmptyMap(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue with empty headers map
 	headers := map[string]string{}
 	payload := []byte("message with empty headers")
 	offset, err := q.EnqueueWithHeaders(payload, headers)
-	if err != nil {
-		t.Fatalf("EnqueueWithHeaders() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if offset == 0 {
 		t.Error("EnqueueWithHeaders() offset = 0, want > 0")
@@ -127,9 +99,7 @@ func TestHeaders_EmptyMap(t *testing.T) {
 
 	// Dequeue and verify no headers
 	msg, err := q.Dequeue()
-	if err != nil {
-		t.Fatalf("Dequeue() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	// Empty headers map should not set the flag, so Headers should be nil
 	if msg.Headers != nil && len(msg.Headers) > 0 {
@@ -139,20 +109,12 @@ func TestHeaders_EmptyMap(t *testing.T) {
 
 // TestHeaders_NilMap tests that nil headers work correctly
 func TestHeaders_NilMap(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue with nil headers
 	payload := []byte("message with nil headers")
 	offset, err := q.EnqueueWithHeaders(payload, nil)
-	if err != nil {
-		t.Fatalf("EnqueueWithHeaders() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if offset == 0 {
 		t.Error("EnqueueWithHeaders() offset = 0, want > 0")
@@ -160,9 +122,7 @@ func TestHeaders_NilMap(t *testing.T) {
 
 	// Dequeue and verify no headers
 	msg, err := q.Dequeue()
-	if err != nil {
-		t.Fatalf("Dequeue() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if msg.Headers != nil && len(msg.Headers) > 0 {
 		t.Errorf("Headers = %v, want nil or empty", msg.Headers)
@@ -171,13 +131,7 @@ func TestHeaders_NilMap(t *testing.T) {
 
 // TestHeaders_LargeHeaders tests headers with large values
 func TestHeaders_LargeHeaders(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Create headers with large values
 	largeValue := string(make([]byte, 1000)) // 1KB value
@@ -189,9 +143,7 @@ func TestHeaders_LargeHeaders(t *testing.T) {
 
 	payload := []byte("message with large headers")
 	offset, err := q.EnqueueWithHeaders(payload, headers)
-	if err != nil {
-		t.Fatalf("EnqueueWithHeaders() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if offset == 0 {
 		t.Error("EnqueueWithHeaders() offset = 0, want > 0")
@@ -199,9 +151,7 @@ func TestHeaders_LargeHeaders(t *testing.T) {
 
 	// Dequeue and verify
 	msg, err := q.Dequeue()
-	if err != nil {
-		t.Fatalf("Dequeue() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if len(msg.Headers) != len(headers) {
 		t.Errorf("Headers count = %d, want %d", len(msg.Headers), len(headers))
@@ -214,13 +164,7 @@ func TestHeaders_LargeHeaders(t *testing.T) {
 
 // TestHeaders_ManyHeaders tests a message with many headers
 func TestHeaders_ManyHeaders(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Create many headers
 	headers := make(map[string]string)
@@ -230,9 +174,7 @@ func TestHeaders_ManyHeaders(t *testing.T) {
 
 	payload := []byte("message with many headers")
 	offset, err := q.EnqueueWithHeaders(payload, headers)
-	if err != nil {
-		t.Fatalf("EnqueueWithHeaders() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if offset == 0 {
 		t.Error("EnqueueWithHeaders() offset = 0, want > 0")
@@ -240,9 +182,7 @@ func TestHeaders_ManyHeaders(t *testing.T) {
 
 	// Dequeue and verify
 	msg, err := q.Dequeue()
-	if err != nil {
-		t.Fatalf("Dequeue() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if len(msg.Headers) != len(headers) {
 		t.Errorf("Headers count = %d, want %d", len(msg.Headers), len(headers))
@@ -260,35 +200,22 @@ func TestHeaders_Persistence(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// First session: enqueue with headers
-	q1, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() first error = %v", err)
-	}
+	q1 := setupQueue(t, DefaultOptions(tmpDir))
 
 	headers := map[string]string{
 		"session": "first",
 		"data":    "persisted",
 	}
-	_, err = q1.EnqueueWithHeaders([]byte("persistent message"), headers)
-	if err != nil {
-		t.Fatalf("EnqueueWithHeaders() error = %v", err)
-	}
+	_, err := q1.EnqueueWithHeaders([]byte("persistent message"), headers)
+	assertNoError(t, err)
 
-	if err := q1.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
+	assertNoError(t, q1.Close())
 
 	// Second session: verify headers are preserved
-	q2, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() second error = %v", err)
-	}
-	defer func() { _ = q2.Close() }()
+	q2 := setupQueue(t, DefaultOptions(tmpDir))
 
 	msg, err := q2.Dequeue()
-	if err != nil {
-		t.Fatalf("Dequeue() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if len(msg.Headers) != len(headers) {
 		t.Errorf("Headers count after persistence = %d, want %d", len(msg.Headers), len(headers))
@@ -303,13 +230,7 @@ func TestHeaders_Persistence(t *testing.T) {
 
 // TestHeaders_BatchDequeue tests headers with batch dequeue
 func TestHeaders_BatchDequeue(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue multiple messages with different headers
 	for i := 0; i < 5; i++ {
@@ -318,7 +239,7 @@ func TestHeaders_BatchDequeue(t *testing.T) {
 			"common": "value",
 		}
 		payload := []byte("message " + string(rune('0'+i)))
-		_, err = q.EnqueueWithHeaders(payload, headers)
+		_, err := q.EnqueueWithHeaders(payload, headers)
 		if err != nil {
 			t.Fatalf("EnqueueWithHeaders() %d error = %v", i, err)
 		}
@@ -326,9 +247,7 @@ func TestHeaders_BatchDequeue(t *testing.T) {
 
 	// Batch dequeue
 	messages, err := q.DequeueBatch(10)
-	if err != nil {
-		t.Fatalf("DequeueBatch() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if len(messages) != 5 {
 		t.Fatalf("Got %d messages, want 5", len(messages))
@@ -352,17 +271,11 @@ func TestHeaders_BatchDequeue(t *testing.T) {
 
 // TestHeaders_MixedMessages tests mix of messages with and without headers
 func TestHeaders_MixedMessages(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue different types of messages
 	// 1. Normal message
-	_, err = q.Enqueue([]byte("normal"))
+	_, err := q.Enqueue([]byte("normal"))
 	if err != nil {
 		t.Fatalf("Enqueue() error = %v", err)
 	}
@@ -370,9 +283,7 @@ func TestHeaders_MixedMessages(t *testing.T) {
 	// 2. Message with headers
 	headers1 := map[string]string{"type": "with-headers"}
 	_, err = q.EnqueueWithHeaders([]byte("with headers"), headers1)
-	if err != nil {
-		t.Fatalf("EnqueueWithHeaders() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	// 3. Message with TTL
 	_, err = q.EnqueueWithTTL([]byte("with ttl"), 5*1000*1000*1000)

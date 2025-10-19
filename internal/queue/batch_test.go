@@ -6,13 +6,7 @@ import (
 )
 
 func TestEnqueueBatch(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue a batch of messages
 	payloads := [][]byte{
@@ -22,9 +16,7 @@ func TestEnqueueBatch(t *testing.T) {
 	}
 
 	offsets, err := q.EnqueueBatch(payloads)
-	if err != nil {
-		t.Fatalf("EnqueueBatch() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if len(offsets) != len(payloads) {
 		t.Errorf("EnqueueBatch() returned %d offsets, want %d", len(offsets), len(payloads))
@@ -41,37 +33,21 @@ func TestEnqueueBatch(t *testing.T) {
 		}
 	}
 
-	// Verify stats
-	stats := q.Stats()
-	if stats.TotalMessages != uint64(len(payloads)) {
-		t.Errorf("TotalMessages = %d, want %d", stats.TotalMessages, len(payloads))
-	}
+	assertStats(t, q, 3, 3)
 }
 
 func TestEnqueueBatch_Empty(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Try to enqueue empty batch
-	_, err = q.EnqueueBatch([][]byte{})
+	_, err := q.EnqueueBatch([][]byte{})
 	if err == nil {
 		t.Error("EnqueueBatch() with empty batch should fail")
 	}
 }
 
 func TestEnqueueBatch_Large(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue a large batch
 	count := 100
@@ -81,28 +57,17 @@ func TestEnqueueBatch_Large(t *testing.T) {
 	}
 
 	offsets, err := q.EnqueueBatch(payloads)
-	if err != nil {
-		t.Fatalf("EnqueueBatch() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if len(offsets) != count {
 		t.Errorf("EnqueueBatch() returned %d offsets, want %d", len(offsets), count)
 	}
 
-	stats := q.Stats()
-	if stats.TotalMessages != uint64(count) {
-		t.Errorf("TotalMessages = %d, want %d", stats.TotalMessages, count)
-	}
+	assertStats(t, q, 100, 100)
 }
 
 func TestDequeueBatch(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue some messages
 	payloads := [][]byte{
@@ -113,15 +78,12 @@ func TestDequeueBatch(t *testing.T) {
 		[]byte("message 5"),
 	}
 
-	if _, err := q.EnqueueBatch(payloads); err != nil {
-		t.Fatalf("EnqueueBatch() error = %v", err)
-	}
+	_, err := q.EnqueueBatch(payloads)
+	assertNoError(t, err)
 
 	// Dequeue a batch
 	messages, err := q.DequeueBatch(3)
-	if err != nil {
-		t.Fatalf("DequeueBatch() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if len(messages) != 3 {
 		t.Errorf("DequeueBatch() returned %d messages, want 3", len(messages))
@@ -148,13 +110,7 @@ func TestDequeueBatch(t *testing.T) {
 }
 
 func TestDequeueBatch_MoreThanAvailable(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue 3 messages
 	payloads := [][]byte{
@@ -163,15 +119,12 @@ func TestDequeueBatch_MoreThanAvailable(t *testing.T) {
 		[]byte("msg3"),
 	}
 
-	if _, err := q.EnqueueBatch(payloads); err != nil {
-		t.Fatalf("EnqueueBatch() error = %v", err)
-	}
+	_, err := q.EnqueueBatch(payloads)
+	assertNoError(t, err)
 
 	// Try to dequeue 10 messages (only 3 available)
 	messages, err := q.DequeueBatch(10)
-	if err != nil {
-		t.Fatalf("DequeueBatch() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if len(messages) != 3 {
 		t.Errorf("DequeueBatch(10) returned %d messages, want 3", len(messages))
@@ -179,73 +132,58 @@ func TestDequeueBatch_MoreThanAvailable(t *testing.T) {
 }
 
 func TestDequeueBatch_Empty(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Try to dequeue from empty queue
-	_, err = q.DequeueBatch(5)
+	_, err := q.DequeueBatch(5)
 	if err == nil {
 		t.Error("DequeueBatch() on empty queue should fail")
 	}
 }
 
 func TestDequeueBatch_InvalidSize(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
-
-	// Try to dequeue with invalid size
-	_, err = q.DequeueBatch(0)
-	if err == nil {
-		t.Error("DequeueBatch(0) should fail")
+	tests := []struct {
+		name string
+		size int
+	}{
+		{"zero size", 0},
+		{"negative size", -1},
+		{"large negative", -100},
 	}
 
-	_, err = q.DequeueBatch(-1)
-	if err == nil {
-		t.Error("DequeueBatch(-1) should fail")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := setupQueue(t, nil)
+			_, err := q.DequeueBatch(tt.size)
+			if err == nil {
+				t.Errorf("DequeueBatch(%d) should fail", tt.size)
+			}
+		})
 	}
 }
 
 func TestBatch_MixedOperations(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
+	q := setupQueue(t, nil)
 
 	// Enqueue batch
 	batch1 := [][]byte{
 		[]byte("batch1-msg1"),
 		[]byte("batch1-msg2"),
 	}
-	if _, err := q.EnqueueBatch(batch1); err != nil {
-		t.Fatalf("EnqueueBatch() error = %v", err)
-	}
+	_, err := q.EnqueueBatch(batch1)
+	assertNoError(t, err)
 
 	// Enqueue single
-	if _, err := q.Enqueue([]byte("single-msg")); err != nil {
-		t.Fatalf("Enqueue() error = %v", err)
-	}
+	_, err = q.Enqueue([]byte("single-msg"))
+	assertNoError(t, err)
 
 	// Enqueue another batch
 	batch2 := [][]byte{
 		[]byte("batch2-msg1"),
 		[]byte("batch2-msg2"),
 	}
-	if _, err := q.EnqueueBatch(batch2); err != nil {
-		t.Fatalf("EnqueueBatch() error = %v", err)
-	}
+	_, err = q.EnqueueBatch(batch2)
+	assertNoError(t, err)
 
 	// Should have 5 total messages
 	stats := q.Stats()
@@ -255,9 +193,7 @@ func TestBatch_MixedOperations(t *testing.T) {
 
 	// Dequeue batch of 3
 	messages, err := q.DequeueBatch(3)
-	if err != nil {
-		t.Fatalf("DequeueBatch() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if len(messages) != 3 {
 		t.Errorf("DequeueBatch() returned %d messages, want 3", len(messages))
@@ -265,9 +201,7 @@ func TestBatch_MixedOperations(t *testing.T) {
 
 	// Dequeue single
 	msg, err := q.Dequeue()
-	if err != nil {
-		t.Fatalf("Dequeue() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if string(msg.Payload) != "batch2-msg1" {
 		t.Errorf("Dequeue() payload = %s, want batch2-msg1", msg.Payload)
@@ -284,10 +218,7 @@ func TestBatch_Persistence(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// First session: enqueue batch
-	q1, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() first error = %v", err)
-	}
+	q1 := setupQueue(t, DefaultOptions(tmpDir))
 
 	payloads := [][]byte{
 		[]byte("batch-msg1"),
@@ -295,20 +226,12 @@ func TestBatch_Persistence(t *testing.T) {
 		[]byte("batch-msg3"),
 	}
 
-	if _, err := q1.EnqueueBatch(payloads); err != nil {
-		t.Fatalf("EnqueueBatch() error = %v", err)
-	}
-
-	if err := q1.Close(); err != nil {
-		t.Fatalf("Close() first error = %v", err)
-	}
+	_, err := q1.EnqueueBatch(payloads)
+	assertNoError(t, err)
+	assertNoError(t, q1.Close())
 
 	// Second session: verify persistence
-	q2, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() second error = %v", err)
-	}
-	defer func() { _ = q2.Close() }()
+	q2 := setupQueue(t, DefaultOptions(tmpDir))
 
 	stats := q2.Stats()
 	if stats.TotalMessages != 3 {
@@ -317,9 +240,7 @@ func TestBatch_Persistence(t *testing.T) {
 
 	// Dequeue batch and verify
 	messages, err := q2.DequeueBatch(3)
-	if err != nil {
-		t.Fatalf("DequeueBatch() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	if len(messages) != 3 {
 		t.Errorf("DequeueBatch() returned %d messages, want 3", len(messages))
@@ -336,17 +257,11 @@ func TestBatch_Persistence(t *testing.T) {
 func TestEnqueueBatch_AfterClose(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-
-	if err := q.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
+	q := setupQueue(t, DefaultOptions(tmpDir))
+	assertNoError(t, q.Close())
 
 	// Try to enqueue batch after close
-	_, err = q.EnqueueBatch([][]byte{[]byte("test")})
+	_, err := q.EnqueueBatch([][]byte{[]byte("test")})
 	if err == nil {
 		t.Error("EnqueueBatch() after Close() should fail")
 	}
@@ -355,19 +270,12 @@ func TestEnqueueBatch_AfterClose(t *testing.T) {
 func TestDequeueBatch_AfterClose(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	q := setupQueue(t, DefaultOptions(tmpDir))
 
 	// Enqueue before close
-	if _, err := q.EnqueueBatch([][]byte{[]byte("test")}); err != nil {
-		t.Fatalf("EnqueueBatch() error = %v", err)
-	}
-
-	if err := q.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
+	_, err := q.EnqueueBatch([][]byte{[]byte("test")})
+	assertNoError(t, err)
+	assertNoError(t, q.Close())
 
 	// Try to dequeue batch after close
 	_, err = q.DequeueBatch(1)
