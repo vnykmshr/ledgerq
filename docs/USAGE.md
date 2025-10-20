@@ -468,220 +468,78 @@ if err != nil {
 - Retry state stored in `.retry_state.json` file
 - Use `Ack()` even if DLQ disabled - enables future DLQ without code changes
 
-**How Ack/Nack Works**:
+**Understanding Ack/Nack:**
 
-⚠️ **Critical Understanding**: `Nack()` does NOT re-deliver messages for retry.
+`Dequeue()` consumes messages permanently (read position advances). `Nack(msgID, reason)` tracks the failure count but does NOT requeue the message. After `MaxRetries` Nack() calls, the message moves to DLQ for manual inspection.
 
-**Actual Behavior:**
-1. `Dequeue()` reads a message and advances the read position
-2. `Nack(msgID, reason)` ONLY tracks the failure - it does NOT requeue the message
-3. The message has already been consumed (read position moved past it)
-4. After `MaxRetries` Nack() calls on the same message ID, it moves to DLQ
-5. **Messages are NOT automatically retried** - Nack is for tracking failures, not retry logic
+For retries with exponential backoff, implement application-level re-enqueue logic (pattern below).
 
-**This means:**
-- ✅ DLQ is for: Tracking repeatedly failed messages and isolating them for manual inspection
-- ❌ DLQ is NOT for: Automatic retry with backoff (messages don't get re-delivered)
-- ⚠️ You must track your own retries if you want to re-process failed messages
+**Retry Pattern:**
 
-**Recommended Patterns for Retries**:
+Store failed messages in memory and re-enqueue with exponential backoff:
 
-1. **Store-and-Retry Pattern** (Recommended - Simple and Reliable):
 ```go
-// Store failed messages in memory, re-enqueue after delay
 type FailedMessage struct {
-    Payload   []byte
-    Headers   map[string]string
-    RetryAt   time.Time
-    Attempts  int
+    Payload  []byte
+    Headers  map[string]string
+    RetryAt  time.Time
+    Attempts int
 }
 
 func worker(q *ledgerq.Queue) {
-    failedMessages := make(map[uint64]*FailedMessage)
+    failedMsgs := make(map[uint64]*FailedMessage)
     const maxRetries = 3
 
-    // Background goroutine to re-enqueue failed messages
+    // Background retry worker
     go func() {
-        ticker := time.NewTicker(time.Second)
-        defer ticker.Stop()
-
-        for range ticker.C {
+        for range time.Tick(time.Second) {
             now := time.Now()
-            for msgID, failed := range failedMessages {
-                if now.After(failed.RetryAt) && failed.Attempts < maxRetries {
-                    // Re-enqueue with retry metadata
-                    failed.Headers["retry_count"] = fmt.Sprintf("%d", failed.Attempts)
-                    q.EnqueueWithHeaders(failed.Payload, failed.Headers)
-                    delete(failedMessages, msgID)
-                } else if failed.Attempts >= maxRetries {
-                    // Move to DLQ manually or just log
-                    log.Printf("Message %d exceeded max retries, giving up", msgID)
-                    delete(failedMessages, msgID)
+            for id, msg := range failedMsgs {
+                if now.After(msg.RetryAt) && msg.Attempts < maxRetries {
+                    msg.Headers["retry_count"] = fmt.Sprintf("%d", msg.Attempts)
+                    q.EnqueueWithHeaders(msg.Payload, msg.Headers)
+                    delete(failedMsgs, id)
+                } else if msg.Attempts >= maxRetries {
+                    log.Printf("Max retries exceeded: %d", id)
+                    delete(failedMsgs, id)
                 }
             }
         }
     }()
 
-    // Main processing loop
+    // Main worker loop
     for {
-        msg, err := q.Dequeue()
-        if err != nil {
-            time.Sleep(100 * time.Millisecond)
-            continue
-        }
+        msg, _ := q.Dequeue()
 
-        // Process message
         if err := processTask(msg.Payload); err != nil {
             attempts := 1
-            if retryCount, ok := msg.Headers["retry_count"]; ok {
-                fmt.Sscanf(retryCount, "%d", &attempts)
+            if rc, ok := msg.Headers["retry_count"]; ok {
+                fmt.Sscanf(rc, "%d", &attempts)
                 attempts++
             }
 
-            // Store for retry with exponential backoff
             backoff := time.Duration(1<<uint(attempts-1)) * time.Second
-            failedMessages[msg.ID] = &FailedMessage{
+            failedMsgs[msg.ID] = &FailedMessage{
                 Payload:  msg.Payload,
                 Headers:  msg.Headers,
                 RetryAt:  time.Now().Add(backoff),
                 Attempts: attempts,
             }
-
-            log.Printf("Task failed [ID:%d, Attempt:%d], will retry in %v",
-                msg.ID, attempts, backoff)
-            continue
-        }
-
-        // Success
-        log.Printf("Task succeeded [ID:%d]", msg.ID)
-    }
-}
-```
-
-2. **Separate Retry Queue** (For persistent retry state):
-```go
-// Use a dedicated retry queue with TTL for backoff delays
-func worker(mainQ, retryQ *ledgerq.Queue) {
-    const maxRetries = 3
-
-    for {
-        msg, err := mainQ.Dequeue()
-        if err != nil {
-            time.Sleep(100 * time.Millisecond)
-            continue
-        }
-
-        // Check retry count from headers
-        retryCount := 0
-        if rc, ok := msg.Headers["retry_count"]; ok {
-            fmt.Sscanf(rc, "%d", &retryCount)
-        }
-
-        // Process message
-        if err := processTask(msg.Payload); err != nil {
-            retryCount++
-
-            if retryCount >= maxRetries {
-                log.Printf("Max retries exceeded for message %d", msg.ID)
-                // Could enqueue to a separate DLQ here
-                continue
-            }
-
-            // Calculate exponential backoff delay
-            backoffDelay := time.Duration(1<<uint(retryCount-1)) * time.Second
-
-            // Enqueue to retry queue with TTL-based delay
-            headers := msg.Headers
-            if headers == nil {
-                headers = make(map[string]string)
-            }
-            headers["retry_count"] = fmt.Sprintf("%d", retryCount)
-            headers["original_msg_id"] = fmt.Sprintf("%d", msg.ID)
-
-            retryQ.EnqueueWithOptions(msg.Payload, backoffDelay, headers)
-            log.Printf("Scheduled retry %d in %v", retryCount, backoffDelay)
-            continue
-        }
-
-        log.Printf("Task succeeded [ID:%d]", msg.ID)
-    }
-}
-
-// Background worker to move expired retry messages back to main queue
-func retryWorker(mainQ, retryQ *ledgerq.Queue) {
-    for {
-        msg, err := retryQ.Dequeue()
-        if err != nil {
-            time.Sleep(100 * time.Millisecond)
-            continue
-        }
-
-        // Re-enqueue to main queue (message has already waited via TTL)
-        mainQ.EnqueueWithHeaders(msg.Payload, msg.Headers)
-    }
-}
-```
-
-3. **DLQ for Final Failures Only** (Simplest - No auto-retry):
-```go
-// Use DLQ only for tracking permanent failures, not for retries
-func worker(q *ledgerq.Queue) {
-    for {
-        msg, err := q.Dequeue()
-        if err != nil {
-            time.Sleep(100 * time.Millisecond)
-            continue
-        }
-
-        // Process message
-        if err := processTask(msg.Payload); err != nil {
-            // Track failure (will move to DLQ after MaxRetries)
-            q.Nack(msg.ID, err.Error())
-
-            // ⚠️ Message is consumed - it won't be retried automatically!
-            // You must manually inspect DLQ and requeue if needed
-            log.Printf("Task failed [ID:%d]: %v", msg.ID, err)
-            continue
-        }
-
-        q.Ack(msg.ID)
-    }
-}
-
-// Separate process to inspect DLQ and manually requeue
-func dlqInspector(q *ledgerq.Queue) {
-    dlq := q.GetDLQ()
-    if dlq == nil {
-        return
-    }
-
-    for {
-        msg, err := dlq.Dequeue()
-        if err != nil {
-            time.Sleep(5 * time.Second)
-            continue
-        }
-
-        log.Printf("DLQ Message: %s, Reason: %s",
-            string(msg.Payload),
-            msg.Headers["dlq.failure_reason"])
-
-        // Decide whether to requeue or discard
-        if shouldRetry(msg) {
-            q.RequeueFromDLQ(msg.ID)
+            log.Printf("Retry scheduled [ID:%d, Attempt:%d] in %v", msg.ID, attempts, backoff)
         }
     }
 }
 ```
 
-**Best Practices**:
-- **Pattern 1** (Store-and-Retry) is simplest for in-process retry logic
-- **Pattern 2** (Retry Queue) provides persistent retry state across restarts
-- **Pattern 3** (DLQ Only) is best when you want manual inspection of all failures
-- Always implement exponential backoff: `2^(attempt-1) * baseDelay`
+**Alternative patterns:** See `examples/dlq/` for:
+- Separate retry queue (persistent state across restarts)
+- DLQ-only mode (manual inspection without auto-retry)
+
+**Best practices:**
+- Use exponential backoff: `2^(attempt-1) * baseDelay`
 - Add jitter to prevent thundering herd: `backoff * (0.9 + rand.Float64()*0.2)`
-- Set reasonable max retries (3-5) to avoid infinite loops
-- Use message headers to track retry count across re-enqueues
+- Set reasonable max retries (3-5 attempts)
+- Track retry count in message headers
 
 **Example: Worker pattern with DLQ**:
 ```go

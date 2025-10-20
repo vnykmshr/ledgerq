@@ -168,7 +168,7 @@ fmt.Printf("Failed: %s, Reason: %s\n",
 q.RequeueFromDLQ(dlqMsg.ID)
 ```
 
-**Important**: `Nack()` does NOT re-deliver messages. Once dequeued, calling `Nack()` only tracks the retry count. After `MaxRetries` calls to `Nack()`, the message moves to DLQ. For automatic retries with backoff, you must implement application-level logic (store failed messages, delay, then re-enqueue). See [USAGE.md](docs/USAGE.md#dead-letter-queue-dlq---v120) for patterns.
+**Note**: `Nack()` tracks failures but does not auto-retry messages. After `MaxRetries` failures, messages move to DLQ. For retry patterns with backoff, see [USAGE.md](docs/USAGE.md#dead-letter-queue-dlq---v120).
 
 **Streaming:**
 
@@ -191,7 +191,7 @@ q.SeekToTimestamp(time.Now().Add(-1 * time.Hour).UnixNano())
 
 ## Performance
 
-Benchmarks (Go 1.21, macOS, Intel i5-8257U @ 2.3GHz, 2025-10-18):
+Benchmarks (Go 1.21, macOS, Intel i5-8257U @ 2.3GHz):
 
 | Operation | Throughput | Latency |
 |-----------|------------|---------|
