@@ -131,30 +131,51 @@ func TestClose(t *testing.T) {
 	assertNoError(t, q.Close())
 }
 
-func TestEnqueue_AfterClose(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q := setupQueue(t, DefaultOptions(tmpDir))
-	assertNoError(t, q.Close())
-
-	// Try to enqueue after close
-	_, err := q.Enqueue([]byte("test"))
-	if err == nil {
-		t.Error("Enqueue() after Close() should fail")
+func TestOperationsAfterClose(t *testing.T) {
+	tests := []struct {
+		name string
+		op   func(*Queue) error
+	}{
+		{
+			name: "Enqueue",
+			op: func(q *Queue) error {
+				_, err := q.Enqueue([]byte("test"))
+				return err
+			},
+		},
+		{
+			name: "Dequeue",
+			op: func(q *Queue) error {
+				_, err := q.Dequeue()
+				return err
+			},
+		},
+		{
+			name: "Sync",
+			op: func(q *Queue) error {
+				return q.Sync()
+			},
+		},
 	}
-}
 
-func TestDequeue_AfterClose(t *testing.T) {
-	tmpDir := t.TempDir()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			q := setupQueue(t, DefaultOptions(tmpDir))
 
-	q := setupQueue(t, DefaultOptions(tmpDir))
-	enqueueN(t, q, 1)
-	assertNoError(t, q.Close())
+			// Enqueue a message for dequeue test
+			if tt.name == "Dequeue" {
+				enqueueN(t, q, 1)
+			}
 
-	// Try to dequeue after close
-	_, err := q.Dequeue()
-	if err == nil {
-		t.Error("Dequeue() after Close() should fail")
+			assertNoError(t, q.Close())
+
+			// Try operation after close
+			err := tt.op(q)
+			if err == nil {
+				t.Errorf("%s() after Close() should fail", tt.name)
+			}
+		})
 	}
 }
 

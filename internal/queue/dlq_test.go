@@ -9,13 +9,14 @@ import (
 
 // Test that DLQ is initialized when DLQPath is configured
 func TestQueue_DLQInitialization(t *testing.T) {
-	dir := t.TempDir()
-	dlqDir := filepath.Join(dir, "dlq")
-	
+	baseDir := t.TempDir()
+	dir := filepath.Join(baseDir, "main")
+	dlqDir := filepath.Join(baseDir, "dlq")
+
 	opts := DefaultOptions(dir)
 	opts.DLQPath = dlqDir
 	opts.MaxRetries = 3
-	
+
 	// Open queue with DLQ configured
 	q, err := Open(dir, opts)
 	if err != nil {
@@ -66,13 +67,14 @@ func TestQueue_DLQNotInitializedByDefault(t *testing.T) {
 
 // Test that DLQ queue itself doesn't have DLQ configured (prevent infinite recursion)
 func TestQueue_DLQNoRecursion(t *testing.T) {
-	dir := t.TempDir()
-	dlqDir := filepath.Join(dir, "dlq")
-	
+	baseDir := t.TempDir()
+	dir := filepath.Join(baseDir, "main")
+	dlqDir := filepath.Join(baseDir, "dlq")
+
 	opts := DefaultOptions(dir)
 	opts.DLQPath = dlqDir
 	opts.MaxRetries = 3
-	
+
 	q, err := Open(dir, opts)
 	if err != nil {
 		t.Fatalf("failed to open queue: %v", err)
@@ -105,8 +107,9 @@ func TestQueue_DLQNoRecursion(t *testing.T) {
 
 // Test that Ack removes message from retry tracking
 func TestQueue_Ack(t *testing.T) {
-	dir := t.TempDir()
-	dlqDir := filepath.Join(dir, "dlq")
+	baseDir := t.TempDir()
+	dir := filepath.Join(baseDir, "main")
+	dlqDir := filepath.Join(baseDir, "dlq")
 
 	opts := DefaultOptions(dir)
 	opts.DLQPath = dlqDir
@@ -159,8 +162,9 @@ func TestQueue_Ack(t *testing.T) {
 
 // Test that Nack increments retry count
 func TestQueue_Nack_IncrementsRetryCount(t *testing.T) {
-	dir := t.TempDir()
-	dlqDir := filepath.Join(dir, "dlq")
+	baseDir := t.TempDir()
+	dir := filepath.Join(baseDir, "main")
+	dlqDir := filepath.Join(baseDir, "dlq")
 
 	opts := DefaultOptions(dir)
 	opts.DLQPath = dlqDir
@@ -206,8 +210,9 @@ func TestQueue_Nack_IncrementsRetryCount(t *testing.T) {
 
 // Test that message is moved to DLQ after exceeding max retries
 func TestQueue_Nack_MovesToDLQ(t *testing.T) {
-	dir := t.TempDir()
-	dlqDir := filepath.Join(dir, "dlq")
+	baseDir := t.TempDir()
+	dir := filepath.Join(baseDir, "main")
+	dlqDir := filepath.Join(baseDir, "dlq")
 
 	opts := DefaultOptions(dir)
 	opts.DLQPath = dlqDir
@@ -349,8 +354,9 @@ func TestQueue_GetDLQ_NotConfigured(t *testing.T) {
 
 // Test GetDLQ returns valid queue when DLQ is configured
 func TestQueue_GetDLQ_Configured(t *testing.T) {
-	dir := t.TempDir()
-	dlqDir := filepath.Join(dir, "dlq")
+	baseDir := t.TempDir()
+	dir := filepath.Join(baseDir, "main")
+	dlqDir := filepath.Join(baseDir, "dlq")
 
 	opts := DefaultOptions(dir)
 	opts.DLQPath = dlqDir
@@ -376,8 +382,9 @@ func TestQueue_GetDLQ_Configured(t *testing.T) {
 
 // Test RequeueFromDLQ moves message back to main queue
 func TestQueue_RequeueFromDLQ(t *testing.T) {
-	dir := t.TempDir()
-	dlqDir := filepath.Join(dir, "dlq")
+	baseDir := t.TempDir()
+	dir := filepath.Join(baseDir, "main")
+	dlqDir := filepath.Join(baseDir, "dlq")
 
 	opts := DefaultOptions(dir)
 	opts.DLQPath = dlqDir
@@ -481,8 +488,9 @@ func TestQueue_RequeueFromDLQ_NoDLQ(t *testing.T) {
 
 // Test message preservation across queue restart
 func TestQueue_DLQ_PersistenceAcrossRestart(t *testing.T) {
-	dir := t.TempDir()
-	dlqDir := filepath.Join(dir, "dlq")
+	baseDir := t.TempDir()
+	dir := filepath.Join(baseDir, "main")
+	dlqDir := filepath.Join(baseDir, "dlq")
 
 	opts := DefaultOptions(dir)
 	opts.DLQPath = dlqDir

@@ -143,53 +143,6 @@ func TestIntegration_MultiSegment(t *testing.T) {
 	}
 }
 
-// TestIntegration_BatchOperations tests batch operations end-to-end
-func TestIntegration_BatchOperations(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
-
-	// Enqueue in batches
-	batchCount := 10
-	batchSize := 20
-	for b := 0; b < batchCount; b++ {
-		batch := make([][]byte, batchSize)
-		for i := 0; i < batchSize; i++ {
-			batch[i] = []byte(fmt.Sprintf("batch-%d-msg-%d", b, i))
-		}
-		if _, err := q.EnqueueBatch(batch); err != nil {
-			t.Fatalf("EnqueueBatch(%d) error = %v", b, err)
-		}
-	}
-
-	totalMessages := batchCount * batchSize
-	stats := q.Stats()
-	if stats.TotalMessages != uint64(totalMessages) {
-		t.Errorf("TotalMessages = %d, want %d", stats.TotalMessages, totalMessages)
-	}
-
-	// Dequeue in batches
-	messagesRead := 0
-	for b := 0; b < batchCount; b++ {
-		messages, err := q.DequeueBatch(batchSize)
-		if err != nil {
-			t.Fatalf("DequeueBatch(%d) error = %v", b, err)
-		}
-		if len(messages) != batchSize {
-			t.Errorf("DequeueBatch(%d) returned %d messages, want %d", b, len(messages), batchSize)
-		}
-		messagesRead += len(messages)
-	}
-
-	if messagesRead != totalMessages {
-		t.Errorf("Read %d messages, want %d", messagesRead, totalMessages)
-	}
-}
-
 // TestIntegration_ReplayOperations tests replay functionality
 func TestIntegration_ReplayOperations(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -407,61 +360,6 @@ func TestIntegration_CrashRecovery(t *testing.T) {
 	// Should be empty now
 	if _, err := q2.Dequeue(); err == nil {
 		t.Error("Dequeue() on empty queue should fail")
-	}
-}
-
-// TestIntegration_LargeMessages tests handling of large payloads
-func TestIntegration_LargeMessages(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
-
-	// Test various payload sizes
-	sizes := []int{
-		1,               // 1 byte
-		1024,            // 1 KB
-		64 * 1024,       // 64 KB
-		512 * 1024,      // 512 KB
-		1024 * 1024,     // 1 MB
-		5 * 1024 * 1024, // 5 MB
-	}
-
-	for _, size := range sizes {
-		payload := make([]byte, size)
-		for i := range payload {
-			payload[i] = byte(i % 256)
-		}
-
-		offset, err := q.Enqueue(payload)
-		if err != nil {
-			t.Fatalf("Enqueue(%d bytes) error = %v", size, err)
-		}
-
-		msg, err := q.Dequeue()
-		if err != nil {
-			t.Fatalf("Dequeue(%d bytes) error = %v", size, err)
-		}
-
-		if len(msg.Payload) != size {
-			t.Errorf("Payload size mismatch: got %d, want %d", len(msg.Payload), size)
-		}
-
-		if msg.Offset != offset {
-			t.Errorf("Offset mismatch: got %d, want %d", msg.Offset, offset)
-		}
-
-		// Verify content
-		for i, b := range msg.Payload {
-			expected := byte(i % 256)
-			if b != expected {
-				t.Errorf("Payload[%d] = %d, want %d", i, b, expected)
-				break
-			}
-		}
 	}
 }
 

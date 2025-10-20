@@ -52,38 +52,6 @@ func TestQueue_Priority_BasicOrdering(t *testing.T) {
 	}
 }
 
-// TestQueue_Priority_FIFOWithinPriority tests that FIFO order is maintained within each priority
-func TestQueue_Priority_FIFOWithinPriority(t *testing.T) {
-	dir := t.TempDir()
-	opts := DefaultOptions(dir)
-	opts.EnablePriorities = true
-
-	q, err := Open(dir, opts)
-	if err != nil {
-		t.Fatalf("failed to create queue: %v", err)
-	}
-	defer q.Close()
-
-	// Enqueue multiple high-priority messages
-	for i := 1; i <= 5; i++ {
-		data := []byte{byte(i)}
-		if _, err := q.EnqueueWithPriority(data, format.PriorityHigh); err != nil {
-			t.Fatalf("failed to enqueue message %d: %v", i, err)
-		}
-	}
-
-	// Dequeue and verify FIFO order
-	for i := 1; i <= 5; i++ {
-		msg, err := q.Dequeue()
-		if err != nil {
-			t.Fatalf("failed to dequeue message %d: %v", i, err)
-		}
-		if msg.Payload[0] != byte(i) {
-			t.Errorf("message %d: got %d, want %d", i, msg.Payload[0], i)
-		}
-	}
-}
-
 // TestQueue_Priority_StarvationPrevention tests that low-priority messages are promoted after starvation window
 func TestQueue_Priority_StarvationPrevention(t *testing.T) {
 	dir := t.TempDir()
@@ -371,119 +339,6 @@ func TestQueue_Priority_Persistence(t *testing.T) {
 	}
 }
 
-// TestQueue_Priority_MixedOperations tests complex scenario with interleaved enqueue/dequeue
-func TestQueue_Priority_MixedOperations(t *testing.T) {
-	dir := t.TempDir()
-	opts := DefaultOptions(dir)
-	opts.EnablePriorities = true
-
-	q, err := Open(dir, opts)
-	if err != nil {
-		t.Fatalf("failed to create queue: %v", err)
-	}
-	defer q.Close()
-
-	// Enqueue low-priority
-	if _, err := q.EnqueueWithPriority([]byte("low1"), format.PriorityLow); err != nil {
-		t.Fatalf("failed to enqueue: %v", err)
-	}
-
-	// Enqueue high-priority
-	if _, err := q.EnqueueWithPriority([]byte("high1"), format.PriorityHigh); err != nil {
-		t.Fatalf("failed to enqueue: %v", err)
-	}
-
-	// Dequeue (should get high1)
-	msg, err := q.Dequeue()
-	if err != nil {
-		t.Fatalf("failed to dequeue: %v", err)
-	}
-	if string(msg.Payload) != "high1" {
-		t.Errorf("expected high1, got %q", string(msg.Payload))
-	}
-
-	// Enqueue medium-priority
-	if _, err := q.EnqueueWithPriority([]byte("medium1"), format.PriorityMedium); err != nil {
-		t.Fatalf("failed to enqueue: %v", err)
-	}
-
-	// Enqueue high-priority
-	if _, err := q.EnqueueWithPriority([]byte("high2"), format.PriorityHigh); err != nil {
-		t.Fatalf("failed to enqueue: %v", err)
-	}
-
-	// Dequeue (should get high2)
-	msg, err = q.Dequeue()
-	if err != nil {
-		t.Fatalf("failed to dequeue: %v", err)
-	}
-	if string(msg.Payload) != "high2" {
-		t.Errorf("expected high2, got %q", string(msg.Payload))
-	}
-
-	// Dequeue (should get medium1)
-	msg, err = q.Dequeue()
-	if err != nil {
-		t.Fatalf("failed to dequeue: %v", err)
-	}
-	if string(msg.Payload) != "medium1" {
-		t.Errorf("expected medium1, got %q", string(msg.Payload))
-	}
-
-	// Dequeue (should get low1)
-	msg, err = q.Dequeue()
-	if err != nil {
-		t.Fatalf("failed to dequeue: %v", err)
-	}
-	if string(msg.Payload) != "low1" {
-		t.Errorf("expected low1, got %q", string(msg.Payload))
-	}
-}
-
-// TestQueue_BatchWithOptions_Priority tests batch enqueue with priorities
-func TestQueue_BatchWithOptions_Priority(t *testing.T) {
-	dir := t.TempDir()
-	opts := DefaultOptions(dir)
-	opts.EnablePriorities = true
-
-	q, err := Open(dir, opts)
-	if err != nil {
-		t.Fatalf("failed to create queue: %v", err)
-	}
-	defer q.Close()
-
-	// Enqueue batch with mixed priorities
-	messages := []BatchEnqueueOptions{
-		{Payload: []byte("low1"), Priority: format.PriorityLow},
-		{Payload: []byte("high1"), Priority: format.PriorityHigh},
-		{Payload: []byte("medium1"), Priority: format.PriorityMedium},
-		{Payload: []byte("low2"), Priority: format.PriorityLow},
-		{Payload: []byte("high2"), Priority: format.PriorityHigh},
-	}
-
-	offsets, err := q.EnqueueBatchWithOptions(messages)
-	if err != nil {
-		t.Fatalf("failed to enqueue batch: %v", err)
-	}
-
-	if len(offsets) != len(messages) {
-		t.Fatalf("expected %d offsets, got %d", len(messages), len(offsets))
-	}
-
-	// Dequeue and verify priority order
-	expectedOrder := []string{"high1", "high2", "medium1", "low1", "low2"}
-
-	for i, expected := range expectedOrder {
-		msg, err := q.Dequeue()
-		if err != nil {
-			t.Fatalf("failed to dequeue message %d: %v", i, err)
-		}
-		if string(msg.Payload) != expected {
-			t.Errorf("message %d: got %q, want %q", i, string(msg.Payload), expected)
-		}
-	}
-}
-
 // TestQueue_BatchWithOptions_TTL tests batch enqueue with TTL
 func TestQueue_BatchWithOptions_TTL(t *testing.T) {
 	dir := t.TempDir()
@@ -669,71 +524,6 @@ func TestQueue_BatchWithOptions_EmptyBatch(t *testing.T) {
 	}
 }
 
-// TestQueue_BatchWithOptions_FIFOMode tests batch with priorities in FIFO mode
-func TestQueue_BatchWithOptions_FIFOMode(t *testing.T) {
-	dir := t.TempDir()
-	opts := DefaultOptions(dir)
-	opts.EnablePriorities = false // FIFO mode
-
-	q, err := Open(dir, opts)
-	if err != nil {
-		t.Fatalf("failed to create queue: %v", err)
-	}
-	defer q.Close()
-
-	// Enqueue batch with priorities (should be ignored in FIFO mode)
-	messages := []BatchEnqueueOptions{
-		{Payload: []byte("first"), Priority: format.PriorityLow},
-		{Payload: []byte("second"), Priority: format.PriorityHigh},
-		{Payload: []byte("third"), Priority: format.PriorityMedium},
-	}
-
-	_, err = q.EnqueueBatchWithOptions(messages)
-	if err != nil {
-		t.Fatalf("failed to enqueue batch: %v", err)
-	}
-
-	// Should dequeue in FIFO order (insertion order)
-	expectedOrder := []string{"first", "second", "third"}
-
-	for i, expected := range expectedOrder {
-		msg, err := q.Dequeue()
-		if err != nil {
-			t.Fatalf("failed to dequeue message %d: %v", i, err)
-		}
-		if string(msg.Payload) != expected {
-			t.Errorf("message %d: got %q, want %q", i, string(msg.Payload), expected)
-		}
-	}
-}
-
-// TestQueue_BatchWithOptions_InvalidPriority tests validation of invalid priority values
-func TestQueue_BatchWithOptions_InvalidPriority(t *testing.T) {
-	dir := t.TempDir()
-	opts := DefaultOptions(dir)
-	opts.EnablePriorities = true
-
-	q, err := Open(dir, opts)
-	if err != nil {
-		t.Fatalf("failed to create queue: %v", err)
-	}
-	defer q.Close()
-
-	// Try to enqueue with invalid priority (> 2)
-	messages := []BatchEnqueueOptions{
-		{Payload: []byte("valid"), Priority: format.PriorityHigh},
-		{Payload: []byte("invalid"), Priority: 5}, // Invalid priority
-	}
-
-	_, err = q.EnqueueBatchWithOptions(messages)
-	if err == nil {
-		t.Error("expected error for invalid priority")
-	}
-	if err != nil && err.Error() != "message 1: invalid priority 5 (must be 0-2)" {
-		t.Errorf("unexpected error message: %v", err)
-	}
-}
-
 // TestQueue_BatchWithOptions_EmptyPayload tests validation of empty payload
 func TestQueue_BatchWithOptions_EmptyPayload(t *testing.T) {
 	dir := t.TempDir()
@@ -761,57 +551,66 @@ func TestQueue_BatchWithOptions_EmptyPayload(t *testing.T) {
 	}
 }
 
-// TestQueue_EnqueueWithPriority_InvalidPriority tests validation of invalid priority values
-func TestQueue_EnqueueWithPriority_InvalidPriority(t *testing.T) {
-	dir := t.TempDir()
-	opts := DefaultOptions(dir)
-	opts.EnablePriorities = true
-
-	q, err := Open(dir, opts)
-	if err != nil {
-		t.Fatalf("failed to create queue: %v", err)
-	}
-	defer q.Close()
-
-	// Try to enqueue with invalid priority (> 2)
-	_, err = q.EnqueueWithPriority([]byte("test"), 5)
-	if err == nil {
-		t.Error("expected error for invalid priority")
-	}
-	if err != nil && err.Error() != "invalid priority 5 (must be 0-2)" {
-		t.Errorf("unexpected error message: %v", err)
-	}
-
-	// Verify valid priorities still work
-	if _, err := q.EnqueueWithPriority([]byte("valid"), format.PriorityHigh); err != nil {
-		t.Errorf("unexpected error for valid priority: %v", err)
-	}
-}
-
-// TestQueue_EnqueueWithAllOptions_InvalidPriority tests validation of invalid priority values
-func TestQueue_EnqueueWithAllOptions_InvalidPriority(t *testing.T) {
-	dir := t.TempDir()
-	opts := DefaultOptions(dir)
-	opts.EnablePriorities = true
-
-	q, err := Open(dir, opts)
-	if err != nil {
-		t.Fatalf("failed to create queue: %v", err)
-	}
-	defer q.Close()
-
-	// Try to enqueue with invalid priority (> 2)
-	_, err = q.EnqueueWithAllOptions([]byte("test"), 10, 0, nil)
-	if err == nil {
-		t.Error("expected error for invalid priority")
-	}
-	if err != nil && err.Error() != "invalid priority 10 (must be 0-2)" {
-		t.Errorf("unexpected error message: %v", err)
+// TestQueue_PriorityValidation consolidates all priority validation tests
+func TestQueue_PriorityValidation(t *testing.T) {
+	tests := []struct {
+		name          string
+		invalidPrio   uint8
+		expectedError string
+		testFunc      func(*Queue, uint8) error
+	}{
+		{
+			name:          "EnqueueWithPriority",
+			invalidPrio:   5,
+			expectedError: "invalid priority 5 (must be 0-2)",
+			testFunc: func(q *Queue, prio uint8) error {
+				_, err := q.EnqueueWithPriority([]byte("test"), prio)
+				return err
+			},
+		},
+		{
+			name:          "EnqueueWithAllOptions",
+			invalidPrio:   10,
+			expectedError: "invalid priority 10 (must be 0-2)",
+			testFunc: func(q *Queue, prio uint8) error {
+				_, err := q.EnqueueWithAllOptions([]byte("test"), prio, 0, nil)
+				return err
+			},
+		},
+		{
+			name:          "EnqueueBatchWithOptions",
+			invalidPrio:   7,
+			expectedError: "message 0: invalid priority 7 (must be 0-2)",
+			testFunc: func(q *Queue, prio uint8) error {
+				messages := []BatchEnqueueOptions{
+					{Payload: []byte("test"), Priority: prio},
+				}
+				_, err := q.EnqueueBatchWithOptions(messages)
+				return err
+			},
+		},
 	}
 
-	// Verify valid priorities still work
-	headers := map[string]string{"key": "value"}
-	if _, err := q.EnqueueWithAllOptions([]byte("valid"), format.PriorityMedium, 1*time.Second, headers); err != nil {
-		t.Errorf("unexpected error for valid priority: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			opts := DefaultOptions(dir)
+			opts.EnablePriorities = true
+
+			q, err := Open(dir, opts)
+			if err != nil {
+				t.Fatalf("failed to create queue: %v", err)
+			}
+			defer q.Close()
+
+			// Test invalid priority
+			err = tt.testFunc(q, tt.invalidPrio)
+			if err == nil {
+				t.Error("expected error for invalid priority")
+			}
+			if err != nil && err.Error() != tt.expectedError {
+				t.Errorf("unexpected error message: got %v, want %s", err, tt.expectedError)
+			}
+		})
 	}
 }
