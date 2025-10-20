@@ -11,6 +11,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.1] - 2025-10-20
+
+### Changed
+
+#### Code Organization and Maintainability
+- **Major Internal Refactoring** - Reorganized `internal/queue` package for improved maintainability
+  - Split monolithic `queue.go` (2,411 lines) into 9 focused modules (342 lines core + 8 feature modules)
+  - Created dedicated files: `enqueue.go`, `dequeue.go`, `dlq.go`, `priority.go`, `stream.go`, `seek.go`, `lifecycle.go`, `options.go`, `validation.go`
+  - Reorganized test files to mirror implementation structure
+  - Reduced `queue_test.go` from 507 to 111 lines, created 4 focused test files
+- **Documentation Updates**
+  - Added comprehensive "Code Organization" section to ARCHITECTURE.md
+  - Documented module responsibilities and design benefits
+- **Test Coverage** - Maintained 76.9% test coverage throughout refactoring
+- **Quality Assurance** - All tests passing, race detector clean
+
+### Technical Details
+- **No API Changes** - Public API (`pkg/ledgerq`) remains unchanged and fully compatible
+- **No Breaking Changes** - This is an internal refactoring only
+- **File Structure Benefits**:
+  - Clear separation of concerns
+  - Average file size ~200 lines (easy to understand)
+  - Easy to locate and modify specific functionality
+  - Reduced cognitive load for developers
+
+---
+
 ## [1.2.0] - 2025-10-20
 
 ### Added
