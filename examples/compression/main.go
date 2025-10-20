@@ -32,7 +32,7 @@ func main() {
 	}
 	defer q.Close()
 
-	fmt.Println("=== LedgerQ Compression Example ===\n")
+	fmt.Println("=== LedgerQ Compression Example ===")
 
 	// Example 1: Small message (won't be compressed due to MinCompressionSize)
 	smallMsg := []byte("Hello, World!")
@@ -41,7 +41,7 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Printf("1. Enqueued small message (13 bytes) at offset %d\n", offset1)
-	fmt.Println("   → Not compressed (below 512 byte threshold)\n")
+	fmt.Println("   → Not compressed (below 512 byte threshold)")
 
 	// Example 2: Large message (will be compressed automatically)
 	largeMsg := []byte(strings.Repeat("This is a test message that will be compressed. ", 50))
@@ -50,7 +50,7 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Printf("2. Enqueued large message (%d bytes) at offset %d\n", len(largeMsg), offset2)
-	fmt.Println("   → Automatically compressed using queue's DefaultCompression\n")
+	fmt.Println("   → Automatically compressed using queue's DefaultCompression")
 
 	// Example 3: Explicit compression override (force compression)
 	mediumMsg := []byte("Force compression on this medium-sized message")
@@ -59,7 +59,7 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Printf("3. Enqueued with explicit compression (%d bytes) at offset %d\n", len(mediumMsg), offset3)
-	fmt.Println("   → Explicitly requested gzip compression\n")
+	fmt.Println("   → Explicitly requested gzip compression")
 
 	// Example 4: Disable compression for specific message
 	offset4, err := q.EnqueueWithCompression(largeMsg, ledgerq.CompressionNone)
@@ -67,7 +67,7 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Printf("4. Enqueued without compression (%d bytes) at offset %d\n", len(largeMsg), offset4)
-	fmt.Println("   → Explicitly disabled compression\n")
+	fmt.Println("   → Explicitly disabled compression")
 
 	// Example 5: Batch with mixed compression
 	batch := []ledgerq.BatchEnqueueOptions{
@@ -89,7 +89,7 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Printf("5. Enqueued batch with mixed compression at offsets %v\n", offsets)
-	fmt.Println("   → Each message can have different compression settings\n")
+	fmt.Println("   → Each message can have different compression settings")
 
 	// Example 6: All options including compression
 	opts6 := ledgerq.EnqueueOptions{
@@ -103,10 +103,10 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Printf("6. Enqueued with all options (%d bytes) at offset %d\n", len(payload6), offset6)
-	fmt.Println("   → Priority + Headers + Compression combined\n")
+	fmt.Println("   → Priority + Headers + Compression combined")
 
 	// Dequeue all messages
-	fmt.Println("=== Dequeuing Messages (Automatic Decompression) ===\n")
+	fmt.Println("\n=== Dequeuing Messages (Automatic Decompression) ===")
 
 	for i := 1; i <= 9; i++ {
 		msg, err := q.Dequeue()
