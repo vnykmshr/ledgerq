@@ -161,6 +161,9 @@ func (w *Writer) Write(entry *format.Entry) (uint64, error) {
 	// Set entry length before validation (Marshal would do this, but we validate first)
 	// Account for optional fields based on flags
 	headerSize := format.EntryHeaderSize
+	if entry.Flags&format.EntryFlagPriority != 0 {
+		headerSize += 1 // Add 1 byte for Priority
+	}
 	if entry.Flags&format.EntryFlagTTL != 0 {
 		headerSize += 8 // Add 8 bytes for ExpiresAt
 	}
@@ -171,6 +174,9 @@ func (w *Writer) Write(entry *format.Entry) (uint64, error) {
 			headersSize += 2 + len(k) + 2 + len(v)
 		}
 		headerSize += headersSize
+	}
+	if entry.Flags&format.EntryFlagCompressed != 0 {
+		headerSize += 1 // Add 1 byte for Compression
 	}
 	entry.Length = uint32(headerSize + len(entry.Payload) + 4) //nolint:gosec // G115: Safe conversion
 

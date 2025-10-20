@@ -3,11 +3,13 @@
 package queue
 
 import (
+	"compress/gzip"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/vnykmshr/ledgerq/internal/format"
 	"github.com/vnykmshr/ledgerq/internal/logging"
 	"github.com/vnykmshr/ledgerq/internal/metrics"
 	"github.com/vnykmshr/ledgerq/internal/segment"
@@ -71,6 +73,23 @@ type Options struct {
 	// Default: 0 (no size limit)
 	DLQMaxSize int64
 
+	// DefaultCompression is the compression type used when not explicitly specified (v1.3.0+)
+	// Set to CompressionNone to disable compression by default
+	// Default: CompressionNone (no compression)
+	DefaultCompression format.CompressionType
+
+	// CompressionLevel is the compression level for algorithms that support it (v1.3.0+)
+	// For GZIP: 1 (fastest) to 9 (best compression), 0 = default (6)
+	// Higher values = better compression but slower
+	// Default: 0 (use algorithm default, which is 6 for gzip)
+	CompressionLevel int
+
+	// MinCompressionSize is the minimum payload size to compress (v1.3.0+)
+	// Messages smaller than this are not compressed even if compression is requested
+	// This avoids the CPU overhead when compression doesn't help much
+	// Default: 1024 bytes (1KB)
+	MinCompressionSize int
+
 	// Logger for structured logging (nil = no logging)
 	Logger logging.Logger
 
@@ -107,6 +126,9 @@ func DefaultOptions(dir string) *Options {
 		MinFreeDiskSpace:         100 * 1024 * 1024,       // 100 MB minimum free space
 		DLQMaxAge:                0,                       // No age-based cleanup by default
 		DLQMaxSize:               0,                       // No size limit by default
+		DefaultCompression:       format.CompressionNone,  // No compression by default
+		CompressionLevel:         0,                       // Use algorithm default (gzip.DefaultCompression = 6)
+		MinCompressionSize:       1024,                    // 1KB minimum for compression
 		Logger:                   logging.NoopLogger{},    // No logging by default
 		MetricsCollector:         metrics.NoopCollector{}, // No metrics by default
 	}
@@ -188,6 +210,24 @@ func (o *Options) Validate() error {
 	// Validate DLQ size limit
 	if o.DLQMaxSize < 0 {
 		return fmt.Errorf("DLQ max size cannot be negative")
+	}
+
+	// Validate compression settings
+	if o.DefaultCompression != format.CompressionNone && o.DefaultCompression != format.CompressionGzip {
+		return fmt.Errorf("invalid default compression type: %d", o.DefaultCompression)
+	}
+
+	// Validate compression level for GZIP
+	if o.CompressionLevel != 0 {
+		if o.CompressionLevel < gzip.HuffmanOnly || o.CompressionLevel > gzip.BestCompression {
+			return fmt.Errorf("invalid compression level: %d (valid range for gzip: %d-%d)",
+				o.CompressionLevel, gzip.HuffmanOnly, gzip.BestCompression)
+		}
+	}
+
+	// Validate minimum compression size
+	if o.MinCompressionSize < 0 {
+		return fmt.Errorf("min compression size cannot be negative")
 	}
 
 	return nil
