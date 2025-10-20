@@ -389,6 +389,66 @@ LedgerQ provides safe concurrent access with these guarantees:
 - No data loss on crash (fsync guarantees)
 - Metadata always consistent with segments
 
+## Code Organization
+
+The codebase is organized into focused, single-purpose modules for maintainability and clarity.
+
+### Internal Queue Package (`internal/queue/`)
+
+The core queue implementation has been refactored from a single 2,411-line file into focused modules:
+
+```
+internal/queue/
+├── queue.go (342 lines)        # Core Queue struct, Open(), Close()
+├── options.go (194 lines)      # Configuration and defaults
+├── validation.go (113 lines)   # Input validation and sanitization
+├── enqueue.go (712 lines)      # All enqueue operations
+├── dequeue.go (465 lines)      # All dequeue operations
+├── dlq.go (276 lines)          # Dead letter queue operations
+├── priority.go (68 lines)      # Priority queue indexing
+├── stream.go (73 lines)        # Streaming API
+├── seek.go (97 lines)          # Queue navigation
+├── lifecycle.go (171 lines)    # Sync, stats, compaction
+├── metadata.go (223 lines)     # Metadata persistence
+└── retry_tracker.go (214 lines)# Retry state tracking
+```
+
+**Module Responsibilities**:
+
+- **queue.go**: Core queue struct definition, Open/Close lifecycle
+- **options.go**: Options struct, defaults, validation
+- **validation.go**: Message size validation, disk space checks, sanitization
+- **enqueue.go**: All enqueue variants (basic, TTL, headers, priority, batch)
+- **dequeue.go**: All dequeue variants (FIFO, priority, batch), Message struct
+- **dlq.go**: Ack/Nack, DLQ movement, requeue operations
+- **priority.go**: Priority index rebuilding and management
+- **stream.go**: Streaming API with context-based polling
+- **seek.go**: SeekToMessageID(), SeekToTimestamp()
+- **lifecycle.go**: Sync(), Stats(), Compact(), timer management
+- **metadata.go**: Persistent state management (next/read message IDs)
+- **retry_tracker.go**: Retry state tracking for DLQ
+
+**Design Benefits**:
+- Each file averages ~200 lines (easy to understand)
+- Clear separation of concerns
+- Easy to locate and modify specific functionality
+- Test files mirror implementation structure
+- Reduced cognitive load for developers
+
+### Public API Package (`pkg/ledgerq/`)
+
+Single-file public API wrapper (833 lines) providing a clean, stable interface:
+
+```
+ledgerq.go
+├── Type definitions (Message, Stats, Options)
+├── Queue wrapper struct
+├── Public API methods (delegate to internal/queue)
+└── Adapters (logger, options conversion)
+```
+
+Kept as a single file for API cohesion - mostly pass-through methods to internal implementation.
+
 ## Compaction
 
 ### Retention Policies
