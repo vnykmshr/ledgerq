@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.2.0] - 2025-10-19
+## [1.2.0] - 2025-10-20
 
 ### Added
 
@@ -65,6 +65,19 @@ DLQ messages automatically include the following headers:
 - Manual investigation of failed messages
 - Automated retry with backoff strategies
 - Message reprocessing after bug fixes
+
+### Fixed
+- **DLQ Tests** - Fixed 8 failing DLQ tests by correcting directory setup pattern (sibling directories instead of subdirectory)
+- **Test Cleanup** - Removed 482 lines of redundant test code across priority, integration, and concurrent tests
+- **Test Performance** - Improved test suite runtime by 22% (73s → 57s) through test consolidation
+- **Documentation Accuracy** - Fixed incorrect dates and missing version information in SECURITY.md
+
+### Improved
+- **Test Quality** - Consolidated repetitive tests into table-driven patterns for better maintainability
+- **Documentation Clarity** - Removed 141 lines of bloat and AI-generated content from USAGE.md
+- **Architecture Documentation** - Added comprehensive priority queue and DLQ design sections to ARCHITECTURE.md
+- **Contributor Experience** - Added new contributor checklist to CONTRIBUTING.md with onboarding steps
+- **Retry Patterns** - Consolidated 3 redundant DLQ retry patterns into 1 recommended pattern with exponential backoff
 
 ---
 
