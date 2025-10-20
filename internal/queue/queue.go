@@ -237,7 +237,7 @@ func checkDiskSpace(dir string, minFreeSpace int64) error {
 	}
 
 	// Available blocks * block size = available bytes
-	availableBytes := int64(stat.Bavail) * int64(stat.Bsize)
+	availableBytes := int64(stat.Bavail * uint64(stat.Bsize))
 
 	if availableBytes < minFreeSpace {
 		return fmt.Errorf("insufficient disk space: %d bytes available, %d bytes required",
