@@ -11,6 +11,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.0] - 2025-10-19
+
+### Added
+
+#### Dead Letter Queue (DLQ) Feature
+- **Automatic Retry Tracking** - Track message processing failures with configurable max retry limit
+- **Dead Letter Queue** - Separate queue for messages that exceed max retry attempts
+- **Message Acknowledgment API** - Explicit `Ack()` and `Nack()` methods for message processing feedback
+- **Crash-Safe Retry State** - Retry counters persist to disk using atomic JSON writes for crash recovery
+- **Failure Metadata** - DLQ messages include original message ID, retry count, failure reason, and timestamp
+- **DLQ Inspection** - Access DLQ messages via `GetDLQ()` method for investigation and monitoring
+- **Message Requeuing** - Move messages from DLQ back to main queue after fixes via `RequeueFromDLQ()`
+- **Zero Overhead When Disabled** - DLQ is opt-in; when disabled, Ack/Nack are no-ops with no performance impact
+- **Infinite Recursion Prevention** - DLQ queue itself doesn't have a DLQ (DLQPath="" and MaxRetries=0)
+- **Comprehensive Testing** - 12 new DLQ tests covering initialization, Ack/Nack, message movement, requeuing, and persistence
+- **DLQ Example** - Complete example program demonstrating DLQ configuration, Ack/Nack, inspection, and requeuing
+
+#### API Additions
+- `Options.DLQPath` (string) - Path to dead letter queue directory (empty = disabled)
+- `Options.MaxRetries` (int) - Maximum retry attempts before moving to DLQ (default: 3)
+- `Queue.Ack(msgID uint64) error` - Acknowledge successful message processing
+- `Queue.Nack(msgID uint64, reason string) error` - Report message processing failure
+- `Queue.GetDLQ() *Queue` - Returns the dead letter queue for inspection (nil if not configured)
+- `Queue.RequeueFromDLQ(dlqMsgID uint64) error` - Move message from DLQ back to main queue
+- `Queue.GetRetryInfo(msgID uint64) *RetryInfo` - Returns retry information for implementing custom retry logic
+- `RetryInfo` type - Contains MessageID, RetryCount, LastFailure, and FailureReason fields
+
+#### DLQ Metadata Headers
+DLQ messages automatically include the following headers:
+- `dlq.original_msg_id` - Original message ID from main queue
+- `dlq.retry_count` - Number of failed processing attempts
+- `dlq.failure_reason` - Last failure reason from Nack()
+- `dlq.last_failure` - Timestamp of last failure (RFC3339 format)
+
+### Changed
+- Version constant updated to `1.2.0`
+- README updated with DLQ feature description and usage example
+- USAGE.md documentation updated with comprehensive DLQ section
+- Examples directory includes new DLQ example
+
+### Implementation Details
+- **RetryTracker Component** - Manages retry state with JSON persistence to `.retry_state.json`
+- **Atomic State Writes** - Uses temp file + rename pattern for crash-safe retry state updates
+- **Separate DLQ Queue** - DLQ is an independent Queue instance, enabling code reuse
+- **Thread-Safe Operations** - All DLQ operations use proper mutex locking for concurrent access
+- **Automatic Directory Creation** - DLQ directory is created automatically when DLQPath is configured
+- **Backward Compatible** - DLQ disabled by default; existing code works without changes
+
+### Use Cases
+- Handling transient failures (network timeouts, temporary service outages)
+- Poison message isolation (malformed data, processing bugs)
+- Manual investigation of failed messages
+- Automated retry with backoff strategies
+- Message reprocessing after bug fixes
+
+---
+
 ## [1.1.0] - 2025-10-19
 
 ### Added

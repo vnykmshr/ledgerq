@@ -11,6 +11,7 @@ A disk-backed message queue with segment-based storage, TTL support, and priorit
 - Zero dependencies beyond the Go standard library
 - High throughput with batch operations
 - **Priority queue support (v1.1.0+)** with starvation prevention
+- **Dead Letter Queue (DLQ) support (v1.2.0+)** for failed message handling
 - Replay from message ID or timestamp
 - Message TTL and headers
 - Metrics and pluggable logging
@@ -132,6 +133,43 @@ messages := []ledgerq.BatchEnqueueOptions{
 offsets, _ := q.EnqueueBatchWithOptions(messages)
 ```
 
+**Dead Letter Queue (v1.2.0+):**
+
+```go
+// Enable DLQ with max retries
+opts := ledgerq.DefaultOptions("/tmp/myqueue")
+opts.DLQPath = "/tmp/myqueue/dlq"
+opts.MaxRetries = 3
+q, _ := ledgerq.Open("/tmp/myqueue", opts)
+
+// Process messages with Ack/Nack
+msg, _ := q.Dequeue()
+
+// Check retry info for custom backoff logic
+if info := q.GetRetryInfo(msg.ID); info != nil {
+    backoff := time.Duration(1<<uint(info.RetryCount)) * time.Second
+    time.Sleep(backoff) // Exponential backoff
+}
+
+if processSuccessfully(msg.Payload) {
+    q.Ack(msg.ID) // Mark as successfully processed
+} else {
+    q.Nack(msg.ID, "processing failed") // Record failure (moves to DLQ after MaxRetries)
+}
+
+// Inspect DLQ messages
+dlq := q.GetDLQ()
+dlqMsg, _ := dlq.Dequeue()
+fmt.Printf("Failed: %s, Reason: %s\n",
+    string(dlqMsg.Payload),
+    dlqMsg.Headers["dlq.failure_reason"])
+
+// Requeue from DLQ after fixing issues
+q.RequeueFromDLQ(dlqMsg.ID)
+```
+
+**Important**: `Nack()` does NOT re-deliver messages. Once dequeued, calling `Nack()` only tracks the retry count. After `MaxRetries` calls to `Nack()`, the message moves to DLQ. For automatic retries with backoff, you must implement application-level logic (store failed messages, delay, then re-enqueue). See [USAGE.md](docs/USAGE.md#dead-letter-queue-dlq---v120) for patterns.
+
 **Streaming:**
 
 ```go
@@ -176,6 +214,7 @@ See [examples/](examples/) for runnable code:
 - [replay](examples/replay) - Seeking and replay
 - [metrics](examples/metrics) - Metrics collection
 - **[priority](examples/priority) - Priority queue (v1.1.0+)**
+- **[dlq](examples/dlq) - Dead Letter Queue (v1.2.0+)**
 
 ## CLI Tool
 

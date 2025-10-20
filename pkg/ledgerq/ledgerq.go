@@ -37,7 +37,7 @@ import (
 
 // Version is the current version of LedgerQ.
 // This is the single source of truth for the application version.
-const Version = "1.1.0"
+const Version = "1.2.0"
 
 // Priority represents the priority level of a message.
 type Priority uint8
@@ -123,6 +123,42 @@ type Options struct {
 	// Set to 0 to disable starvation prevention
 	// Default: 30 seconds
 	PriorityStarvationWindow time.Duration
+
+	// DLQPath is the path to the dead letter queue directory (v1.2.0+)
+	// If empty, DLQ is disabled. Messages that fail processing after MaxRetries
+	// will be moved to this separate queue for inspection and potential reprocessing.
+	// Default: "" (disabled)
+	DLQPath string
+
+	// MaxRetries is the maximum number of delivery attempts before moving to DLQ (v1.2.0+)
+	// Set to 0 for unlimited retries (messages never move to DLQ).
+	// Only effective when DLQPath is configured.
+	// Default: 3
+	MaxRetries int
+
+	// MaxMessageSize is the maximum size in bytes for a single message payload (v1.2.0+)
+	// Messages larger than this will be rejected during enqueue.
+	// Set to 0 for unlimited message size (not recommended for production).
+	// Default: 10 MB
+	MaxMessageSize int64
+
+	// MinFreeDiskSpace is the minimum required free disk space in bytes (v1.2.0+)
+	// Enqueue operations will fail if available disk space falls below this threshold.
+	// Set to 0 to disable disk space checking (not recommended for production).
+	// Default: 100 MB
+	MinFreeDiskSpace int64
+
+	// DLQMaxAge is the maximum age for messages in the DLQ (v1.2.0+)
+	// Messages older than this duration will be removed during compaction.
+	// Set to 0 to keep DLQ messages indefinitely.
+	// Default: 0 (no age-based cleanup)
+	DLQMaxAge time.Duration
+
+	// DLQMaxSize is the maximum total size in bytes for the DLQ (v1.2.0+)
+	// When DLQ exceeds this size, oldest messages will be removed during compaction.
+	// Set to 0 for unlimited DLQ size.
+	// Default: 0 (no size limit)
+	DLQMaxSize int64
 
 	// Logger for structured logging (nil = no logging)
 	// Default: no logging
@@ -222,6 +258,18 @@ type Stats struct {
 
 	// SegmentCount is the number of segments
 	SegmentCount int
+
+	// DLQ statistics (v1.2.0+)
+	// These fields are populated only when DLQ is enabled
+
+	// DLQMessages is the total number of messages in the DLQ
+	DLQMessages uint64
+
+	// DLQPendingMessages is the number of unprocessed messages in the DLQ
+	DLQPendingMessages uint64
+
+	// RetryTrackedMessages is the number of messages currently being tracked for retries
+	RetryTrackedMessages int
 }
 
 // CompactionResult contains the result of a compaction operation.
@@ -259,11 +307,17 @@ func DefaultOptions(dir string) *Options {
 		MaxSegmentSize:           1024 * 1024 * 1024, // 1GB
 		MaxSegmentMessages:       0,                  // Unlimited
 		RotationPolicy:           RotateBySize,
-		RetentionPolicy:          nil,              // No retention
-		EnablePriorities:         false,            // FIFO mode by default
-		PriorityStarvationWindow: 30 * time.Second, // 30 seconds
-		Logger:                   nil,              // No logging
-		MetricsCollector:         nil,              // No metrics
+		RetentionPolicy:          nil,                  // No retention
+		EnablePriorities:         false,                // FIFO mode by default
+		PriorityStarvationWindow: 30 * time.Second,     // 30 seconds
+		DLQPath:                  "",                   // DLQ disabled by default
+		MaxRetries:               3,                    // 3 retries before moving to DLQ
+		MaxMessageSize:           10 * 1024 * 1024,     // 10 MB max message size
+		MinFreeDiskSpace:         100 * 1024 * 1024,    // 100 MB minimum free space
+		DLQMaxAge:                0,                    // No age-based cleanup by default
+		DLQMaxSize:               0,                    // No size limit by default
+		Logger:                   nil,                  // No logging
+		MetricsCollector:         nil,                  // No metrics
 	}
 }
 
@@ -286,6 +340,12 @@ func Open(dir string, opts *Options) (*Queue, error) {
 			CompactionInterval:       opts.CompactionInterval,
 			EnablePriorities:         opts.EnablePriorities,
 			PriorityStarvationWindow: opts.PriorityStarvationWindow,
+			DLQPath:                  opts.DLQPath,
+			MaxRetries:               opts.MaxRetries,
+			MaxMessageSize:           opts.MaxMessageSize,
+			MinFreeDiskSpace:         opts.MinFreeDiskSpace,
+			DLQMaxAge:                opts.DLQMaxAge,
+			DLQMaxSize:               opts.DLQMaxSize,
 			Logger:                   convertLogger(opts.Logger),
 			MetricsCollector:         metricsCollector,
 		}
@@ -465,11 +525,14 @@ func (q *Queue) Close() error {
 func (q *Queue) Stats() *Stats {
 	stats := q.q.Stats()
 	return &Stats{
-		TotalMessages:   stats.TotalMessages,
-		PendingMessages: stats.PendingMessages,
-		NextMessageID:   stats.NextMessageID,
-		ReadMessageID:   stats.ReadMessageID,
-		SegmentCount:    stats.SegmentCount,
+		TotalMessages:        stats.TotalMessages,
+		PendingMessages:      stats.PendingMessages,
+		NextMessageID:        stats.NextMessageID,
+		ReadMessageID:        stats.ReadMessageID,
+		SegmentCount:         stats.SegmentCount,
+		DLQMessages:          stats.DLQMessages,
+		DLQPendingMessages:   stats.DLQPendingMessages,
+		RetryTrackedMessages: stats.RetryTrackedMessages,
 	}
 }
 
@@ -525,6 +588,178 @@ func (q *Queue) Stream(ctx context.Context, handler StreamHandler) error {
 	}
 
 	return q.q.Stream(ctx, internalHandler)
+}
+
+// Ack acknowledges successful processing of a message (v1.2.0+).
+// When DLQ is enabled, this removes the message from retry tracking.
+// If DLQ is not configured, this method is a no-op.
+//
+// This should be called after successfully processing a dequeued message
+// to indicate that the message does not need to be retried.
+//
+// Example usage:
+//
+//	msg, err := q.Dequeue()
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//
+//	// Process the message
+//	if err := processMessage(msg); err != nil {
+//	    // Processing failed - report failure
+//	    q.Nack(msg.ID, err.Error())
+//	} else {
+//	    // Processing succeeded - acknowledge
+//	    q.Ack(msg.ID)
+//	}
+func (q *Queue) Ack(msgID uint64) error {
+	return q.q.Ack(msgID)
+}
+
+// Nack reports a message processing failure (v1.2.0+).
+// When DLQ is enabled, this increments the retry count and potentially moves
+// the message to the dead letter queue if max retries are exceeded.
+// If DLQ is not configured, this method is a no-op.
+//
+// The reason parameter should describe why the message processing failed.
+// This reason is stored with the retry metadata for debugging purposes.
+//
+// When a message exceeds the configured MaxRetries, it is automatically moved
+// to the DLQ with metadata headers containing:
+//   - dlq.original_msg_id: Original message ID from the main queue
+//   - dlq.retry_count: Number of failed attempts
+//   - dlq.failure_reason: Last failure reason provided to Nack()
+//   - dlq.last_failure: Timestamp of the last failure
+func (q *Queue) Nack(msgID uint64, reason string) error {
+	return q.q.Nack(msgID, reason)
+}
+
+// GetDLQ returns the dead letter queue for inspection (v1.2.0+).
+// Returns nil if DLQ is not configured.
+// The returned queue can be used to inspect or dequeue messages from the DLQ.
+//
+// Example usage:
+//
+//	dlq := q.GetDLQ()
+//	if dlq != nil {
+//	    stats := dlq.Stats()
+//	    fmt.Printf("DLQ has %d pending messages\n", stats.PendingMessages)
+//
+//	    // Inspect DLQ messages
+//	    msg, err := dlq.Dequeue()
+//	    if err == nil {
+//	        fmt.Printf("Failed message: %s\n", msg.Payload)
+//	        fmt.Printf("Failure reason: %s\n", msg.Headers["dlq.failure_reason"])
+//	    }
+//	}
+func (q *Queue) GetDLQ() *Queue {
+	dlq := q.q.GetDLQ()
+	if dlq == nil {
+		return nil
+	}
+	return &Queue{q: dlq}
+}
+
+// RequeueFromDLQ moves a message from the DLQ back to the main queue (v1.2.0+).
+// The message ID should be from the DLQ (not the original message ID).
+// Returns an error if DLQ is not configured or the message is not found.
+//
+// The message is enqueued to the main queue with its original payload and headers,
+// but DLQ-specific metadata headers are removed.
+//
+// Example usage:
+//
+//	dlq := q.GetDLQ()
+//	if dlq != nil {
+//	    msg, err := dlq.Dequeue()
+//	    if err == nil {
+//	        // Requeue the message back to main queue
+//	        if err := q.RequeueFromDLQ(msg.ID); err != nil {
+//	            log.Printf("Failed to requeue: %v", err)
+//	        }
+//	    }
+//	}
+func (q *Queue) RequeueFromDLQ(dlqMsgID uint64) error {
+	return q.q.RequeueFromDLQ(dlqMsgID)
+}
+
+// RetryInfo contains retry metadata for a message (v1.2.0+).
+type RetryInfo struct {
+	// MessageID is the message ID being tracked
+	MessageID uint64
+
+	// RetryCount is the number of times Nack() has been called for this message
+	RetryCount int
+
+	// LastFailure is the timestamp of the most recent Nack() call
+	LastFailure time.Time
+
+	// FailureReason is the reason string from the most recent Nack() call
+	FailureReason string
+}
+
+// GetRetryInfo returns retry information for a message (v1.2.0+).
+// Returns nil if DLQ is not configured or if the message has no retry tracking.
+// This is useful for implementing custom retry logic and backoff strategies.
+//
+// The returned RetryInfo contains:
+//   - MessageID: The message ID being tracked
+//   - RetryCount: Number of times Nack() has been called for this message
+//   - LastFailure: Timestamp of the most recent Nack() call
+//   - FailureReason: Reason string from the most recent Nack() call
+//
+// Example usage:
+//
+//	msg, _ := q.Dequeue()
+//	info := q.GetRetryInfo(msg.ID)
+//	if info != nil && info.RetryCount > 0 {
+//	    // Calculate exponential backoff based on retry count
+//	    backoff := CalculateBackoff(info.RetryCount, time.Second, 5*time.Minute)
+//	    log.Printf("Message has failed %d times, waiting %v before retry",
+//	        info.RetryCount, backoff)
+//	    time.Sleep(backoff)
+//	}
+//
+//	// Process the message
+//	if err := processMessage(msg.Payload); err != nil {
+//	    q.Nack(msg.ID, err.Error())
+//	} else {
+//	    q.Ack(msg.ID)
+//	}
+func (q *Queue) GetRetryInfo(msgID uint64) *RetryInfo {
+	info := q.q.GetRetryInfo(msgID)
+	if info == nil {
+		return nil
+	}
+
+	return &RetryInfo{
+		MessageID:     info.MessageID,
+		RetryCount:    info.RetryCount,
+		LastFailure:   info.LastFailure,
+		FailureReason: info.FailureReason,
+	}
+}
+
+// CalculateBackoff calculates exponential backoff duration based on retry count (v1.2.0+).
+// This is a helper function for implementing retry logic with the DLQ system.
+// The backoff duration increases exponentially: baseDelay * 2^retryCount, capped at maxBackoff.
+//
+// Parameters:
+//   - retryCount: Number of previous retry attempts (typically from RetryInfo.RetryCount)
+//   - baseDelay: Base delay for the first retry (e.g., 1 second)
+//   - maxBackoff: Maximum backoff duration to prevent excessively long waits
+//
+// Example usage:
+//
+//	msg, _ := q.Dequeue()
+//	if info := q.GetRetryInfo(msg.ID); info != nil && info.RetryCount > 0 {
+//	    backoff := CalculateBackoff(info.RetryCount, time.Second, 5*time.Minute)
+//	    time.Sleep(backoff)
+//	}
+//
+// Returns the calculated backoff duration, always between baseDelay and maxBackoff.
+func CalculateBackoff(retryCount int, baseDelay, maxBackoff time.Duration) time.Duration {
+	return queue.CalculateBackoff(retryCount, baseDelay, maxBackoff)
 }
 
 // Helper functions to convert between public and internal types
