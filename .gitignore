@@ -43,9 +43,11 @@ go.work
 # Development todos (workflow management)
 /todos/
 
-# Built binaries (in project root only)
+# Built binaries
 /ledgerq-cli
 /ledgerq
+
+# Example binaries (in root and examples directories)
 /simple
 /producer-consumer
 /streaming
@@ -53,3 +55,14 @@ go.work
 /headers
 /replay
 /metrics
+/priority
+/dlq
+examples/*/simple
+examples/*/producer-consumer
+examples/*/streaming
+examples/*/ttl
+examples/*/headers
+examples/*/replay
+examples/*/metrics
+examples/*/priority
+examples/*/dlq
