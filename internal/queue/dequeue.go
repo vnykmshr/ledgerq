@@ -123,11 +123,27 @@ func (q *Queue) dequeueFIFO(now int64, start time.Time) (*Message, error) {
 					break // Continue outer loop
 				}
 
+				// Decompress payload if compressed
+				payload := entry.Payload
+				if entry.Compression != format.CompressionNone {
+					decompressed, err := format.DecompressPayload(entry.Payload, entry.Compression)
+					if err != nil {
+						q.opts.MetricsCollector.RecordDequeueError()
+						q.opts.Logger.Error("failed to decompress message",
+							logging.F("msg_id", entry.MsgID),
+							logging.F("compression_type", entry.Compression.String()),
+							logging.F("error", err.Error()),
+						)
+						return nil, fmt.Errorf("failed to decompress message %d: %w", entry.MsgID, err)
+					}
+					payload = decompressed
+				}
+
 				// Found valid (non-expired) message!
 				msg := &Message{
 					ID:        entry.MsgID,
 					Offset:    offset,
-					Payload:   entry.Payload,
+					Payload:   payload,
 					Timestamp: entry.Timestamp,
 					ExpiresAt: entry.ExpiresAt,
 					Priority:  entry.Priority,
@@ -288,11 +304,27 @@ func (q *Queue) dequeuePriority(now int64, start time.Time) (*Message, error) {
 			continue
 		}
 
+		// Decompress payload if compressed
+		payload := entry.Payload
+		if entry.Compression != format.CompressionNone {
+			decompressed, err := format.DecompressPayload(entry.Payload, entry.Compression)
+			if err != nil {
+				q.opts.MetricsCollector.RecordDequeueError()
+				q.opts.Logger.Error("failed to decompress message",
+					logging.F("msg_id", entry.MsgID),
+					logging.F("compression_type", entry.Compression.String()),
+					logging.F("error", err.Error()),
+				)
+				return nil, fmt.Errorf("failed to decompress message %d: %w", entry.MsgID, err)
+			}
+			payload = decompressed
+		}
+
 		// Found valid message!
 		msg := &Message{
 			ID:        entry.MsgID,
 			Offset:    fileOffset,
-			Payload:   entry.Payload,
+			Payload:   payload,
 			Timestamp: entry.Timestamp,
 			ExpiresAt: entry.ExpiresAt,
 			Priority:  entry.Priority,
@@ -424,11 +456,27 @@ func (q *Queue) DequeueBatch(maxMessages int) ([]*Message, error) {
 					break // Continue to next message
 				}
 
+				// Decompress payload if compressed
+				payload := entry.Payload
+				if entry.Compression != format.CompressionNone {
+					decompressed, err := format.DecompressPayload(entry.Payload, entry.Compression)
+					if err != nil {
+						q.opts.MetricsCollector.RecordDequeueError()
+						q.opts.Logger.Error("failed to decompress message in batch",
+							logging.F("msg_id", entry.MsgID),
+							logging.F("compression_type", entry.Compression.String()),
+							logging.F("error", err.Error()),
+						)
+						return nil, fmt.Errorf("failed to decompress message %d: %w", entry.MsgID, err)
+					}
+					payload = decompressed
+				}
+
 				// Valid message - add to results
 				msg := &Message{
 					ID:        entry.MsgID,
 					Offset:    offset,
-					Payload:   entry.Payload,
+					Payload:   payload,
 					Timestamp: entry.Timestamp,
 					ExpiresAt: entry.ExpiresAt,
 					Priority:  entry.Priority,
