@@ -1,10 +1,27 @@
 # Contributing to LedgerQ
 
+**Last Updated:** 2025-10-20
+
 Thank you for your interest in contributing to LedgerQ! We welcome contributions from the community.
 
 ## Code of Conduct
 
 This project adheres to a [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
+
+## New Contributor Checklist
+
+For your first contribution:
+
+- [ ] Fork the repo and clone locally
+- [ ] Run `make install-tools` to install golangci-lint and security scanners
+- [ ] Run `make test` to verify all tests pass on your machine
+- [ ] Read [ARCHITECTURE.md](docs/ARCHITECTURE.md) to understand internal structure
+- [ ] Pick a ["good first issue"](https://github.com/vnykmshr/ledgerq/labels/good%20first%20issue) or discuss new features in an issue first
+- [ ] Create your feature branch from `main`
+- [ ] Make changes + add tests (aim for >80% coverage)
+- [ ] Run `make all` before committing (runs fmt, lint, test, build)
+- [ ] Write a clear commit message following our guidelines
+- [ ] Open pull request with description of changes
 
 ## How to Contribute
 

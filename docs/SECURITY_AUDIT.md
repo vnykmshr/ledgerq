@@ -1,8 +1,10 @@
 # Security Audit Report
 
-**Date:** 2025-10-18
-**Version:** v1.0.0
+**Audit Date:** 2025-10-18
+**Version Audited:** v1.0.0
 **Audit Scope:** Complete codebase security review
+
+**Note:** This audit covers v1.0.0. Priority queue (v1.1.0) and DLQ (v1.2.0) features require separate security review.
 
 ## Executive Summary
 

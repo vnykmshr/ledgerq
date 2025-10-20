@@ -1,6 +1,10 @@
 # LedgerQ Architecture
 
-Internal architecture and design decisions.
+**Last Updated:** 2025-10-20
+**Version:** 1.2.0
+**Review Cadence:** Quarterly
+
+Internal architecture and design decisions for LedgerQ message queue.
 
 ## Storage Format
 
@@ -112,6 +116,8 @@ Queue (internal)
   ├── Metadata Manager (persistent state)
   ├── Reader (dequeue, seek, scan)
   ├── Writer (enqueue, batch)
+  ├── Priority Index (optional: priority-aware dequeue)
+  ├── Retry Tracker (optional: DLQ retry state)
   ├── TTL Handler (expiration logic)
   ├── Compaction Timer
   └── Sync Manager
@@ -245,6 +251,53 @@ Format
 - Flags field in entry format
 - Optional fields parsed based on flags
 - Version field for breaking changes
+
+### 6. Priority Queue (Optional)
+
+**When Enabled** (`EnablePriorities=true`):
+
+An in-memory `PriorityIndex` maintains three sorted slices for fast priority-aware dequeue:
+
+```
+PriorityIndex
+  ├── High:   [msgID1, msgID5, msgID7]  // Sorted by ID (FIFO within priority)
+  ├── Medium: [msgID2, msgID6]
+  └── Low:    [msgID3, msgID4]
+```
+
+**Dequeue Flow**:
+1. Check High slice → binary search + segment read
+2. If empty, check Medium slice
+3. If empty, check Low slice
+4. Apply starvation prevention (auto-promote old low-priority after threshold)
+
+**Memory Usage**: ~24 bytes per pending message (uint64 msgID + priority byte + index overhead)
+
+**Persistence**: Priority index rebuilt from segments on startup by reading priority flag from each entry.
+
+### 7. Dead Letter Queue (Optional)
+
+**When Enabled** (`DLQPath` configured):
+
+```
+Main Queue
+  ├── Retry Tracker (.retry_state.json)
+  │   └── {msgID: {count, last_failure, reason}}
+  └── DLQ Queue (separate Queue instance)
+      └── Messages exceeding MaxRetries
+```
+
+**Retry Flow**:
+1. `Dequeue()` → message consumed
+2. `Nack(msgID, reason)` → increment retry count in tracker
+3. If `retryCount >= MaxRetries` → move to DLQ with metadata headers
+4. `Ack(msgID)` → remove from retry tracker
+
+**DLQ Properties**:
+- Separate Queue instance (code reuse)
+- No nested DLQ (DLQPath="" for DLQ itself)
+- Atomic state persistence (temp file + rename)
+- Metadata headers: `dlq.original_msg_id`, `dlq.retry_count`, `dlq.failure_reason`, `dlq.last_failure`
 
 ## Concurrency Model
 

@@ -1,5 +1,8 @@
 # LedgerQ Usage Guide
 
+**Last Updated:** 2025-10-20
+**Version:** 1.2.0
+
 Complete reference for using LedgerQ.
 
 ## Table of Contents
