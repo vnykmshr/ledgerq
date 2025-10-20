@@ -12,6 +12,7 @@ A disk-backed message queue with segment-based storage, TTL support, and priorit
 - High throughput with batch operations
 - **Priority queue support (v1.1.0+)** with starvation prevention
 - **Dead Letter Queue (DLQ) support (v1.2.0+)** for failed message handling
+- **Payload compression (v1.3.0+)** with GZIP to reduce disk usage
 - Replay from message ID or timestamp
 - Message TTL and headers
 - Metrics and pluggable logging
@@ -102,6 +103,23 @@ q.EnqueueWithTTL([]byte("temporary"), 5*time.Second)
 ```go
 headers := map[string]string{"content-type": "application/json"}
 q.EnqueueWithHeaders(payload, headers)
+```
+
+**Payload compression (v1.3.0+):**
+
+```go
+// Enable compression by default
+opts := ledgerq.DefaultOptions("/tmp/myqueue")
+opts.DefaultCompression = ledgerq.CompressionGzip
+opts.CompressionLevel = 6  // 1 (fastest) to 9 (best compression)
+opts.MinCompressionSize = 1024  // Only compress >= 1KB
+q, _ := ledgerq.Open("/tmp/myqueue", opts)
+
+// Messages are automatically compressed/decompressed
+q.Enqueue(largePayload)  // Compressed if >= 1KB
+
+// Or control compression per-message
+q.EnqueueWithCompression(payload, ledgerq.CompressionGzip)
 ```
 
 **Priority queue (v1.1.0+):**
