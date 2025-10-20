@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Code Organization and Maintainability
 - **Major Internal Refactoring** - Reorganized `internal/queue` package for improved maintainability
   - Split monolithic `queue.go` (2,411 lines) into 9 focused modules (342 lines core + 8 feature modules)
-  - Created dedicated files: `enqueue.go`, `dequeue.go`, `dlq.go`, `priority.go`, `stream.go`, `seek.go`, `lifecycle.go`, `options.go`, `validation.go`
+  - Created dedicated files: `enqueue.go`, `dequeue.go`, `dlq.go`, `priority.go`, `stream.go`, `seek.go`, `lifecycle.go`, `options.go`
+  - Split validation into platform-specific files: `validation_common.go`, `validation_unix.go`, `validation_windows.go`
   - Reorganized test files to mirror implementation structure
   - Reduced `queue_test.go` from 507 to 111 lines, created 4 focused test files
 - **Documentation Updates**
@@ -26,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Documented module responsibilities and design benefits
 - **Test Coverage** - Maintained 76.9% test coverage throughout refactoring
 - **Quality Assurance** - All tests passing, race detector clean
+
+### Fixed
+- **Windows Cross-Compilation** - Added platform-specific disk space checking
+  - Unix/Linux/macOS: Uses `syscall.Statfs` for disk space checks
+  - Windows: Uses `GetDiskFreeSpaceExW` API for disk space checks
+  - Release binaries now build successfully for all platforms (Linux, macOS, Windows)
 
 ### Technical Details
 - **No API Changes** - Public API (`pkg/ledgerq`) remains unchanged and fully compatible
@@ -35,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Average file size ~200 lines (easy to understand)
   - Easy to locate and modify specific functionality
   - Reduced cognitive load for developers
+- **Platform Support**:
+  - Linux (amd64, arm64)
+  - macOS (amd64, arm64)
+  - Windows (amd64)
 
 ---
 
