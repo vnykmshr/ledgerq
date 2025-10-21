@@ -26,6 +26,7 @@ type DedupTracker struct {
 type dedupEntry struct {
 	DedupID    string `json:"dedup_id"`    // SHA-256 hash of user-provided ID
 	MessageID  uint64 `json:"message_id"`  // Original message ID
+	Offset     uint64 `json:"offset"`      // File offset where message is stored
 	EnqueuedAt int64  `json:"enqueued_at"` // Unix nanoseconds
 	ExpiresAt  int64  `json:"expires_at"`  // Unix nanoseconds
 }
@@ -51,8 +52,8 @@ func NewDedupTracker(statePath string, maxSize int) *DedupTracker {
 	}
 }
 
-// Check returns the original message ID if the dedup ID is a duplicate.
-// Returns (msgID, true) if duplicate found, (0, false) if new.
+// Check returns the original offset if the dedup ID is a duplicate.
+// Returns (offset, true) if duplicate found, (0, false) if new.
 func (dt *DedupTracker) Check(dedupID string, window time.Duration) (uint64, bool) {
 	if dedupID == "" {
 		return 0, false
@@ -73,12 +74,12 @@ func (dt *DedupTracker) Check(dedupID string, window time.Duration) (uint64, boo
 		return 0, false
 	}
 
-	return entry.MessageID, true
+	return entry.Offset, true
 }
 
 // Track adds a new message to the deduplication table.
 // Returns error if table is full or dedup ID is empty.
-func (dt *DedupTracker) Track(dedupID string, msgID uint64, window time.Duration) error {
+func (dt *DedupTracker) Track(dedupID string, msgID uint64, offset uint64, window time.Duration) error {
 	if dedupID == "" {
 		return fmt.Errorf("deduplication ID cannot be empty")
 	}
@@ -98,6 +99,7 @@ func (dt *DedupTracker) Track(dedupID string, msgID uint64, window time.Duration
 	dt.entries[hash] = &dedupEntry{
 		DedupID:    hash,
 		MessageID:  msgID,
+		Offset:     offset,
 		EnqueuedAt: now,
 		ExpiresAt:  now + window.Nanoseconds(),
 	}

@@ -11,31 +11,31 @@ func TestDedupTracker_CheckAndTrack(t *testing.T) {
 	tracker := NewDedupTracker("", 1000)
 
 	// Check non-existent entry
-	msgID, isDup := tracker.Check("order-123", 5*time.Minute)
+	offset, isDup := tracker.Check("order-123", 5*time.Minute)
 	if isDup {
 		t.Error("Expected no duplicate for new entry")
 	}
-	if msgID != 0 {
-		t.Errorf("Expected msgID=0, got %d", msgID)
+	if offset != 0 {
+		t.Errorf("Expected offset=0, got %d", offset)
 	}
 
 	// Track new entry
-	err := tracker.Track("order-123", 42, 5*time.Minute)
+	err := tracker.Track("order-123", 42, 42, 5*time.Minute)
 	if err != nil {
 		t.Fatalf("Failed to track entry: %v", err)
 	}
 
 	// Check duplicate
-	msgID, isDup = tracker.Check("order-123", 5*time.Minute)
+	offset, isDup = tracker.Check("order-123", 5*time.Minute)
 	if !isDup {
 		t.Error("Expected duplicate detection")
 	}
-	if msgID != 42 {
-		t.Errorf("Expected msgID=42, got %d", msgID)
+	if offset != 42 {
+		t.Errorf("Expected offset=42, got %d", offset)
 	}
 
 	// Different dedup ID should not be duplicate
-	msgID, isDup = tracker.Check("order-456", 5*time.Minute)
+	offset, isDup = tracker.Check("order-456", 5*time.Minute)
 	if isDup {
 		t.Error("Different dedup ID should not be duplicate")
 	}
@@ -51,7 +51,7 @@ func TestDedupTracker_EmptyDedupID(t *testing.T) {
 	}
 
 	// Track with empty ID
-	err := tracker.Track("", 42, 5*time.Minute)
+	err := tracker.Track("", 42, 42, 5*time.Minute)
 	if err == nil {
 		t.Error("Expected error when tracking empty dedup ID")
 	}
@@ -61,7 +61,7 @@ func TestDedupTracker_Expiration(t *testing.T) {
 	tracker := NewDedupTracker("", 1000)
 
 	// Track with very short window
-	err := tracker.Track("order-123", 42, 50*time.Millisecond)
+	err := tracker.Track("order-123", 42, 42, 50*time.Millisecond)
 	if err != nil {
 		t.Fatalf("Failed to track: %v", err)
 	}
@@ -86,9 +86,9 @@ func TestDedupTracker_CleanExpired(t *testing.T) {
 	tracker := NewDedupTracker("", 1000)
 
 	// Track multiple entries with different windows
-	tracker.Track("order-1", 1, 50*time.Millisecond)
-	tracker.Track("order-2", 2, 1*time.Hour)
-	tracker.Track("order-3", 3, 50*time.Millisecond)
+	tracker.Track("order-1", 1, 1, 50*time.Millisecond)
+	tracker.Track("order-2", 2, 2, 1*time.Hour)
+	tracker.Track("order-3", 3, 3, 50*time.Millisecond)
 
 	if tracker.Count() != 3 {
 		t.Errorf("Expected 3 entries, got %d", tracker.Count())
@@ -119,14 +119,14 @@ func TestDedupTracker_MaxSize(t *testing.T) {
 
 	// Fill to capacity
 	for i := 0; i < 5; i++ {
-		err := tracker.Track(string(rune('a'+i)), uint64(i), 1*time.Hour)
+		err := tracker.Track(string(rune('a'+i)), uint64(i), uint64(i), 1*time.Hour)
 		if err != nil {
 			t.Fatalf("Failed to track entry %d: %v", i, err)
 		}
 	}
 
 	// Try to add beyond capacity
-	err := tracker.Track("overflow", 999, 1*time.Hour)
+	err := tracker.Track("overflow", 999, 999, 1*time.Hour)
 	if err == nil {
 		t.Error("Expected error when exceeding max size")
 	}
@@ -138,7 +138,7 @@ func TestDedupTracker_MaxSize(t *testing.T) {
 	}
 
 	// Still can't add
-	err = tracker.Track("overflow", 999, 1*time.Hour)
+	err = tracker.Track("overflow", 999, 999, 1*time.Hour)
 	if err == nil {
 		t.Error("Expected error after cleanup with no expired entries")
 	}
@@ -148,14 +148,14 @@ func TestDedupTracker_MaxSizeWithExpired(t *testing.T) {
 	tracker := NewDedupTracker("", 3)
 
 	// Add entries that will expire
-	tracker.Track("temp-1", 1, 50*time.Millisecond)
-	tracker.Track("temp-2", 2, 50*time.Millisecond)
+	tracker.Track("temp-1", 1, 1, 50*time.Millisecond)
+	tracker.Track("temp-2", 2, 2, 50*time.Millisecond)
 
 	// Add entry that won't expire
-	tracker.Track("perm-1", 3, 1*time.Hour)
+	tracker.Track("perm-1", 3, 3, 1*time.Hour)
 
 	// Table is full (3/3)
-	err := tracker.Track("new", 4, 1*time.Hour)
+	err := tracker.Track("new", 4, 4, 1*time.Hour)
 	if err == nil {
 		t.Error("Expected error when table full")
 	}
@@ -164,7 +164,7 @@ func TestDedupTracker_MaxSizeWithExpired(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Now we can add new entries (expired ones don't count toward limit)
-	err = tracker.Track("new", 4, 1*time.Hour)
+	err = tracker.Track("new", 4, 4, 1*time.Hour)
 	if err != nil {
 		t.Errorf("Expected success after entries expired: %v", err)
 	}
@@ -174,9 +174,9 @@ func TestDedupTracker_ActiveCount(t *testing.T) {
 	tracker := NewDedupTracker("", 1000)
 
 	// Track some entries with different windows
-	tracker.Track("short-1", 1, 50*time.Millisecond)
-	tracker.Track("long-1", 2, 1*time.Hour)
-	tracker.Track("short-2", 3, 50*time.Millisecond)
+	tracker.Track("short-1", 1, 1, 50*time.Millisecond)
+	tracker.Track("long-1", 2, 2, 1*time.Hour)
+	tracker.Track("short-2", 3, 3, 50*time.Millisecond)
 
 	// All should be active initially
 	if tracker.ActiveCount() != 3 {
@@ -201,8 +201,8 @@ func TestDedupTracker_Persistence(t *testing.T) {
 
 	// Create tracker and add entries
 	tracker1 := NewDedupTracker(statePath, 1000)
-	tracker1.Track("order-123", 42, 1*time.Hour)
-	tracker1.Track("order-456", 99, 1*time.Hour)
+	tracker1.Track("order-123", 42, 42, 1*time.Hour)
+	tracker1.Track("order-456", 99, 99, 1*time.Hour)
 
 	if tracker1.Count() != 2 {
 		t.Fatalf("Expected 2 entries, got %d", tracker1.Count())
@@ -232,14 +232,14 @@ func TestDedupTracker_Persistence(t *testing.T) {
 	}
 
 	// Verify specific entries
-	msgID, isDup := tracker2.Check("order-123", 1*time.Hour)
-	if !isDup || msgID != 42 {
-		t.Errorf("Expected order-123 to be tracked with msgID=42, got isDup=%v msgID=%d", isDup, msgID)
+	offset, isDup := tracker2.Check("order-123", 1*time.Hour)
+	if !isDup || offset != 42 {
+		t.Errorf("Expected order-123 to be tracked with offset=42, got isDup=%v offset=%d", isDup, offset)
 	}
 
-	msgID, isDup = tracker2.Check("order-456", 1*time.Hour)
-	if !isDup || msgID != 99 {
-		t.Errorf("Expected order-456 to be tracked with msgID=99, got isDup=%v msgID=%d", isDup, msgID)
+	offset, isDup = tracker2.Check("order-456", 1*time.Hour)
+	if !isDup || offset != 99 {
+		t.Errorf("Expected order-456 to be tracked with offset=99, got isDup=%v offset=%d", isDup, offset)
 	}
 }
 
@@ -250,8 +250,8 @@ func TestDedupTracker_PersistenceSkipsExpired(t *testing.T) {
 	tracker1 := NewDedupTracker(statePath, 1000)
 
 	// Add entries with different windows
-	tracker1.Track("short", 1, 50*time.Millisecond)
-	tracker1.Track("long", 2, 1*time.Hour)
+	tracker1.Track("short", 1, 1, 50*time.Millisecond)
+	tracker1.Track("long", 2, 2, 1*time.Hour)
 
 	// Wait for short entry to expire
 	time.Sleep(100 * time.Millisecond)
@@ -302,7 +302,7 @@ func TestDedupTracker_ConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			for j := 0; j < 100; j++ {
 				dedupID := string(rune('a' + (id*100+j)%26))
-				tracker.Track(dedupID, uint64(id*100+j), 1*time.Hour)
+				tracker.Track(dedupID, uint64(id*100+j), uint64(id*100+j), 1*time.Hour)
 				tracker.Check(dedupID, 1*time.Hour)
 			}
 			done <- true
@@ -324,7 +324,7 @@ func TestDedupTracker_HashCollisionResistance(t *testing.T) {
 	tracker := NewDedupTracker("", 1000)
 
 	// Track with one dedup ID
-	tracker.Track("order-123", 42, 1*time.Hour)
+	tracker.Track("order-123", 42, 42, 1*time.Hour)
 
 	// Different dedup ID should not collide
 	_, isDup := tracker.Check("order-124", 1*time.Hour)
@@ -335,18 +335,18 @@ func TestDedupTracker_HashCollisionResistance(t *testing.T) {
 	// Track multiple similar IDs
 	for i := 0; i < 100; i++ {
 		id := string(rune('a' + i))
-		tracker.Track(id, uint64(i), 1*time.Hour)
+		tracker.Track(id, uint64(i), uint64(i), 1*time.Hour)
 	}
 
 	// All should be tracked independently
 	for i := 0; i < 100; i++ {
 		id := string(rune('a' + i))
-		msgID, isDup := tracker.Check(id, 1*time.Hour)
+		offset, isDup := tracker.Check(id, 1*time.Hour)
 		if !isDup {
 			t.Errorf("Expected %s to be tracked", id)
 		}
-		if msgID != uint64(i) {
-			t.Errorf("Expected msgID=%d for %s, got %d", i, id, msgID)
+		if offset != uint64(i) {
+			t.Errorf("Expected offset=%d for %s, got %d", i, id, offset)
 		}
 	}
 }
@@ -356,7 +356,7 @@ func TestDedupTracker_Close(t *testing.T) {
 	statePath := filepath.Join(tmpDir, ".dedup_state.json")
 
 	tracker := NewDedupTracker(statePath, 1000)
-	tracker.Track("order-123", 42, 1*time.Hour)
+	tracker.Track("order-123", 42, 42, 1*time.Hour)
 
 	// Close should persist state
 	err := tracker.Close()
@@ -380,7 +380,7 @@ func TestDedupTracker_Close(t *testing.T) {
 // Benchmark tests
 func BenchmarkDedupTracker_Check(b *testing.B) {
 	tracker := NewDedupTracker("", 100000)
-	tracker.Track("order-123", 42, 1*time.Hour)
+	tracker.Track("order-123", 42, 42, 1*time.Hour)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -393,7 +393,7 @@ func BenchmarkDedupTracker_Track(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tracker.Track(string(rune('a'+(i%26))), uint64(i), 1*time.Hour)
+		tracker.Track(string(rune('a'+(i%26))), uint64(i), uint64(i), 1*time.Hour)
 	}
 }
 
@@ -402,7 +402,7 @@ func BenchmarkDedupTracker_CleanExpired(b *testing.B) {
 
 	// Add many entries
 	for i := 0; i < 10000; i++ {
-		tracker.Track(string(rune('a'+(i%26))), uint64(i), 1*time.Hour)
+		tracker.Track(string(rune('a'+(i%26))), uint64(i), uint64(i), 1*time.Hour)
 	}
 
 	b.ResetTimer()

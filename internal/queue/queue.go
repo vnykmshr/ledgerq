@@ -64,6 +64,12 @@ type Queue struct {
 	dlq          *Queue        // Separate queue instance for DLQ
 	retryTracker *RetryTracker // Retry state tracker
 
+	// Deduplication tracker (v1.4.0+)
+	// Only initialized when DefaultDeduplicationWindow > 0
+	dedupTracker       *DedupTracker
+	dedupCleanupTicker *time.Ticker
+	dedupCleanupDone   chan bool
+
 	// Periodic sync
 	syncTimer       *time.Timer
 	syncTimerActive bool
@@ -185,6 +191,35 @@ func Open(dir string, opts *Options) (*Queue, error) {
 		)
 	}
 
+	// Initialize deduplication tracker if configured (v1.4.0+)
+	if opts.DefaultDeduplicationWindow > 0 {
+		dedupStatePath := dir + "/.dedup_state.json"
+		dedupTracker := NewDedupTracker(dedupStatePath, opts.MaxDeduplicationEntries)
+
+		// Load persistent state if it exists
+		if err := dedupTracker.Load(); err != nil {
+			_ = metadata.Close()
+			_ = segments.Close()
+			if q.retryTracker != nil {
+				_ = q.retryTracker.Close()
+			}
+			if q.dlq != nil {
+				_ = q.dlq.Close()
+			}
+			return nil, fmt.Errorf("failed to load dedup state: %w", err)
+		}
+		q.dedupTracker = dedupTracker
+
+		// Start periodic cleanup
+		q.startDedupCleanup()
+
+		opts.Logger.Info("deduplication initialized",
+			logging.F("window", opts.DefaultDeduplicationWindow.String()),
+			logging.F("max_entries", opts.MaxDeduplicationEntries),
+			logging.F("loaded_entries", dedupTracker.Count()),
+		)
+	}
+
 	// Start periodic sync timer if configured
 	if !opts.AutoSync && opts.SyncInterval > 0 {
 		q.startSyncTimer()
@@ -282,6 +317,22 @@ func (q *Queue) Close() error {
 	if q.compactionTimerActive {
 		q.compactionTimer.Stop()
 		q.compactionTimerActive = false
+	}
+
+	// Stop dedup cleanup goroutine (v1.4.0+)
+	if q.dedupCleanupTicker != nil {
+		q.dedupCleanupTicker.Stop()
+		close(q.dedupCleanupDone)
+	}
+
+	// Close dedup tracker and persist state (v1.4.0+)
+	if q.dedupTracker != nil {
+		if err := q.dedupTracker.Close(); err != nil {
+			q.opts.Logger.Error("failed to close dedup tracker",
+				logging.F("error", err.Error()),
+			)
+			return err
+		}
 	}
 
 	// Close DLQ components first (v1.2.0+)

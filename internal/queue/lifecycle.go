@@ -82,6 +82,30 @@ func (q *Queue) startCompactionTimer() {
 	q.compactionTimerActive = true
 }
 
+// startDedupCleanup starts the periodic deduplication cleanup goroutine (v1.4.0+).
+func (q *Queue) startDedupCleanup() {
+	q.dedupCleanupTicker = time.NewTicker(10 * time.Second)
+	q.dedupCleanupDone = make(chan bool)
+
+	go func() {
+		for {
+			select {
+			case <-q.dedupCleanupTicker.C:
+				if q.dedupTracker != nil {
+					removed := q.dedupTracker.CleanExpired()
+					if removed > 0 {
+						q.opts.Logger.Debug("dedup cleanup completed",
+							logging.F("entries_removed", removed),
+						)
+					}
+				}
+			case <-q.dedupCleanupDone:
+				return
+			}
+		}
+	}()
+}
+
 // Stats returns queue statistics.
 type Stats struct {
 	// TotalMessages is the total number of messages ever enqueued
@@ -110,6 +134,9 @@ type Stats struct {
 
 	// RetryTrackedMessages is the number of messages currently being tracked for retries
 	RetryTrackedMessages int
+
+	// DedupTrackedEntries is the number of active dedup entries (v1.4.0+)
+	DedupTrackedEntries int
 }
 
 // Stats returns current queue statistics.
@@ -140,6 +167,11 @@ func (q *Queue) Stats() *Stats {
 	// Populate retry tracking statistics if enabled
 	if q.retryTracker != nil {
 		stats.RetryTrackedMessages = q.retryTracker.Count()
+	}
+
+	// Populate dedup statistics if enabled (v1.4.0+)
+	if q.dedupTracker != nil {
+		stats.DedupTrackedEntries = q.dedupTracker.ActiveCount()
 	}
 
 	return stats
