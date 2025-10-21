@@ -4,7 +4,11 @@
 **Version Audited:** v1.0.0
 **Audit Scope:** Complete codebase security review
 
-**Note:** This audit covers v1.0.0. Priority queue (v1.1.0) and DLQ (v1.2.0) features require separate security review.
+**Note:** This audit covers v1.0.0 only. Features added in later versions require separate security review:
+- v1.1.0: Priority queues (in-memory index, starvation prevention)
+- v1.2.0: Dead Letter Queue (retry tracking, DLQ management)
+- v1.3.0: Payload compression (GZIP, decompression bomb protection)
+- v1.4.0: Message deduplication (SHA-256 hashing, in-memory tracking)
 
 ## Executive Summary
 

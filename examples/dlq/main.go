@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 
 	"github.com/vnykmshr/ledgerq/pkg/ledgerq"
 )
@@ -21,14 +20,16 @@ import (
 func main() {
 	// Create temporary directories for the queue and DLQ
 	queueDir := "/tmp/ledgerq-dlq-example"
-	dlqDir := filepath.Join(queueDir, "dlq")
+	dlqDir := "/tmp/ledgerq-dlq-example-dlq"
 
 	// Clean up from previous runs
 	os.RemoveAll(queueDir)
+	os.RemoveAll(dlqDir)
 	if err := os.MkdirAll(queueDir, 0755); err != nil {
 		log.Fatal(err)
 	}
 	defer os.RemoveAll(queueDir)
+	defer os.RemoveAll(dlqDir)
 
 	fmt.Println("LedgerQ Dead Letter Queue (DLQ) Example")
 	fmt.Println("========================================")

@@ -58,6 +58,7 @@ go.work
 /priority
 /dlq
 /compression
+/deduplication
 examples/*/simple
 examples/*/producer-consumer
 examples/*/streaming
@@ -68,3 +69,4 @@ examples/*/metrics
 examples/*/priority
 examples/*/dlq
 examples/*/compression
+examples/*/deduplication

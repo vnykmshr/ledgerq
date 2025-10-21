@@ -57,7 +57,7 @@ func TestQueue_Priority_StarvationPrevention(t *testing.T) {
 	dir := t.TempDir()
 	opts := DefaultOptions(dir)
 	opts.EnablePriorities = true
-	opts.PriorityStarvationWindow = 100 * time.Millisecond // Short window for testing
+	opts.PriorityStarvationWindow = 5 * time.Millisecond // Short window for testing
 
 	q, err := Open(dir, opts)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestQueue_Priority_StarvationPrevention(t *testing.T) {
 	}
 
 	// Wait for starvation window to pass
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	// Enqueue high-priority messages
 	if _, err := q.EnqueueWithPriority([]byte("high1"), format.PriorityHigh); err != nil {
@@ -121,7 +121,7 @@ func TestQueue_Priority_WithTTL(t *testing.T) {
 	defer q.Close()
 
 	// Enqueue high-priority message with short TTL
-	if _, err := q.EnqueueWithAllOptions([]byte("high-expired"), format.PriorityHigh, 50*time.Millisecond, nil); err != nil {
+	if _, err := q.EnqueueWithAllOptions([]byte("high-expired"), format.PriorityHigh, 2*time.Millisecond, nil); err != nil {
 		t.Fatalf("failed to enqueue: %v", err)
 	}
 
@@ -131,7 +131,7 @@ func TestQueue_Priority_WithTTL(t *testing.T) {
 	}
 
 	// Wait for high-priority message to expire
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 
 	// Dequeue should skip expired high-priority and return low-priority
 	msg, err := q.Dequeue()
@@ -353,7 +353,7 @@ func TestQueue_BatchWithOptions_TTL(t *testing.T) {
 
 	// Enqueue batch with TTL
 	messages := []BatchEnqueueOptions{
-		{Payload: []byte("expires"), Priority: format.PriorityHigh, TTL: 50 * time.Millisecond},
+		{Payload: []byte("expires"), Priority: format.PriorityHigh, TTL: 2 * time.Millisecond},
 		{Payload: []byte("persistent"), Priority: format.PriorityLow, TTL: 0},
 	}
 
@@ -363,7 +363,7 @@ func TestQueue_BatchWithOptions_TTL(t *testing.T) {
 	}
 
 	// Wait for first message to expire
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	// Should get second message (first expired)
 	msg, err := q.Dequeue()
@@ -449,12 +449,12 @@ func TestQueue_BatchWithOptions_AllFeatures(t *testing.T) {
 		{
 			Payload:  []byte("high-with-ttl"),
 			Priority: format.PriorityHigh,
-			TTL:      100 * time.Millisecond,
+			TTL:      time.Hour, // Long TTL so it doesn't expire during test
 		},
 		{
 			Payload:  []byte("medium-all"),
 			Priority: format.PriorityMedium,
-			TTL:      5 * time.Second,
+			TTL:      time.Hour,
 			Headers:  map[string]string{"key": "value2"},
 		},
 	}

@@ -90,6 +90,16 @@ type Options struct {
 	// Default: 1024 bytes (1KB)
 	MinCompressionSize int
 
+	// DefaultDeduplicationWindow is the default time window for dedup tracking (v1.4.0+)
+	// Set to 0 to disable deduplication by default
+	// Default: 0 (disabled)
+	DefaultDeduplicationWindow time.Duration
+
+	// MaxDeduplicationEntries is the maximum number of dedup entries to track (v1.4.0+)
+	// Prevents unbounded memory growth
+	// Default: 100,000 entries (~6.4 MB)
+	MaxDeduplicationEntries int
+
 	// Logger for structured logging (nil = no logging)
 	Logger logging.Logger
 
@@ -126,11 +136,13 @@ func DefaultOptions(dir string) *Options {
 		MinFreeDiskSpace:         100 * 1024 * 1024,       // 100 MB minimum free space
 		DLQMaxAge:                0,                       // No age-based cleanup by default
 		DLQMaxSize:               0,                       // No size limit by default
-		DefaultCompression:       format.CompressionNone,  // No compression by default
-		CompressionLevel:         0,                       // Use algorithm default (gzip.DefaultCompression = 6)
-		MinCompressionSize:       1024,                    // 1KB minimum for compression
-		Logger:                   logging.NoopLogger{},    // No logging by default
-		MetricsCollector:         metrics.NoopCollector{}, // No metrics by default
+		DefaultCompression:         format.CompressionNone,  // No compression by default
+		CompressionLevel:           0,                       // Use algorithm default (gzip.DefaultCompression = 6)
+		MinCompressionSize:         1024,                    // 1KB minimum for compression
+		DefaultDeduplicationWindow: 0,                       // No deduplication by default
+		MaxDeduplicationEntries:    100000,                  // 100K entries (~6.4 MB)
+		Logger:                     logging.NoopLogger{},    // No logging by default
+		MetricsCollector:           metrics.NoopCollector{}, // No metrics by default
 	}
 }
 

@@ -1,7 +1,9 @@
 # LedgerQ Usage Guide
 
-**Last Updated:** 2025-10-20
-**Version:** 1.2.0
+**Last Updated:** 2025-10-21
+**Version:** 1.4.0
+**Maintainer:** @vnykmshr
+**Review Cadence:** After each minor version release
 
 Complete reference for using LedgerQ.
 
@@ -11,6 +13,18 @@ Complete reference for using LedgerQ.
 - [Basic Operations](#basic-operations)
 - [Configuration](#configuration)
 - [Advanced Features](#advanced-features)
+  - [Message TTL](#message-ttl-time-to-live)
+  - [Message Headers](#message-headers)
+  - [Streaming API](#streaming-api)
+  - [Replay Operations](#replay-operations)
+  - [Queue Statistics](#queue-statistics)
+  - [Metrics Collection](#metrics-collection)
+  - [Logging](#logging)
+  - [Manual Compaction](#manual-compaction)
+  - [Priority Queue (v1.1.0+)](#priority-queue---v110)
+  - [Dead Letter Queue (v1.2.0+)](#dead-letter-queue-dlq---v120)
+  - [Payload Compression (v1.3.0+)](#payload-compression---v130)
+  - [Message Deduplication (v1.4.0+)](#message-deduplication---v140)
 - [CLI Tool](#cli-tool)
 - [Best Practices](#best-practices)
   - [Performance](#performance)
@@ -372,6 +386,41 @@ opts.CompactionInterval = 5 * time.Minute
 // Compaction runs in background
 ```
 
+### Priority Queue - v1.1.0+
+
+Process urgent messages first with three priority levels.
+
+**Enable priority mode**:
+```go
+opts := ledgerq.DefaultOptions("/path/to/queue")
+opts.EnablePriorities = true
+q, err := ledgerq.Open("/path/to/queue", opts)
+```
+
+**Enqueue with priority**:
+```go
+// Priority constants: PriorityHigh (2), PriorityMedium (1), PriorityLow (0)
+q.EnqueueWithPriority([]byte("urgent task"), ledgerq.PriorityHigh)
+q.EnqueueWithPriority([]byte("normal task"), ledgerq.PriorityMedium)
+q.EnqueueWithPriority([]byte("background"), ledgerq.PriorityLow)
+
+// Dequeue returns highest priority first
+msg, _ := q.Dequeue()  // Returns "urgent task"
+```
+
+**Batch operations with priorities**:
+```go
+messages := []ledgerq.BatchEnqueueOptions{
+    {Payload: []byte("urgent"), Priority: ledgerq.PriorityHigh, TTL: time.Hour},
+    {Payload: []byte("normal"), Priority: ledgerq.PriorityMedium},
+}
+offsets, _ := q.EnqueueBatchWithOptions(messages)
+```
+
+**Important**: `DequeueBatch()` returns messages in FIFO order (ignores priorities). Use `Dequeue()` in a loop for priority-aware processing.
+
+**Memory usage**: Priority mode maintains an in-memory index. ~24 MB per 1M pending messages.
+
 ### Dead Letter Queue (DLQ) - v1.2.0+
 
 Handle failed messages with automatic retry tracking and dead letter queue support.
@@ -572,6 +621,92 @@ func worker(q *ledgerq.Queue) {
         q.Ack(msg.ID)
     }
 }
+```
+
+### Payload Compression - v1.3.0+
+
+Reduce disk usage with optional GZIP compression. Useful for large text payloads (JSON, XML, logs).
+
+**Enable compression by default**:
+```go
+opts := ledgerq.DefaultOptions("/path/to/queue")
+opts.DefaultCompression = ledgerq.CompressionGzip
+opts.CompressionLevel = 6             // 1 (fastest) to 9 (best compression)
+opts.MinCompressionSize = 1024        // Only compress payloads >= 1KB
+q, err := ledgerq.Open("/path/to/queue", opts)
+```
+
+**Per-message compression**:
+```go
+// Compress specific message
+q.EnqueueWithCompression(largePayload, ledgerq.CompressionGzip)
+
+// Disable compression for small message
+q.EnqueueWithCompression(smallPayload, ledgerq.CompressionNone)
+```
+
+**How it works**:
+- Automatic compression/decompression (transparent to application)
+- Skips compression if savings < 5% (efficiency check)
+- Decompression bomb protection (100MB limit)
+- Uses stdlib `compress/gzip` (zero dependencies)
+
+**When to use**:
+- Large text payloads (JSON, XML, logs): 60-80% compression
+- Small payloads (<1KB): Skip compression (overhead not worth it)
+- Binary data (images, protobuf): Usually pre-compressed, skip
+
+### Message Deduplication - v1.4.0+
+
+Prevent duplicate processing with idempotency keys. Perfect for at-least-once delivery semantics.
+
+**Enable deduplication**:
+```go
+opts := ledgerq.DefaultOptions("/path/to/queue")
+opts.DefaultDeduplicationWindow = 5 * time.Minute
+opts.MaxDeduplicationEntries = 100000   // Max 100K tracked (~6.4 MB memory)
+q, err := ledgerq.Open("/path/to/queue", opts)
+```
+
+**Enqueue with deduplication**:
+```go
+// Use business ID as dedup key (e.g., order ID, request ID)
+offset, isDup, err := q.EnqueueWithDedup(payload, "order-12345", 0)
+if isDup {
+    fmt.Printf("Duplicate! Original at offset %d\n", offset)
+    // Message NOT enqueued, returned offset of original
+} else {
+    fmt.Printf("New message at offset %d\n", offset)
+}
+```
+
+**Custom time windows**:
+```go
+// Override default window for this message
+q.EnqueueWithDedup(payload, "payment-789", 10*time.Minute)
+
+// Use 0 to apply queue's default window
+q.EnqueueWithDedup(payload, "event-456", 0)
+```
+
+**How it works**:
+- SHA-256 hash of dedup ID (not payload)
+- O(1) duplicate detection with in-memory hash table
+- Entries expire after time window
+- State persists across restarts (`.dedup_state.json`)
+- Background cleanup every 10 seconds
+
+**Memory usage**: ~64 bytes per tracked entry. 100K entries ≈ 6.4 MB.
+
+**Use cases**:
+- Idempotent message processing (prevent duplicate orders)
+- DLQ requeue safety (prevent re-processing)
+- Webhook deduplication (same event sent multiple times)
+
+**View statistics**:
+```go
+stats := q.Stats()
+fmt.Printf("Tracking %d unique messages\n", stats.DedupTrackedEntries)
 ```
 
 ## CLI Tool

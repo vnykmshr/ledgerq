@@ -756,6 +756,148 @@ func (q *Queue) EnqueueBatchWithOptions(messages []BatchEnqueueOptions) ([]uint6
 	return offsets, nil
 }
 
+// EnqueueWithDedup appends a message with deduplication tracking (v1.4.0+).
+// If a message with the same dedupID was enqueued within the deduplication window,
+// this returns the original message ID and offset without writing a duplicate.
+// Returns (offset, isDuplicate, error).
+//
+// dedupID: A unique identifier for this message (e.g., order ID, request ID)
+// window: How long to track this message for deduplication (0 = use queue default)
+//
+// Example:
+//
+//	offset, isDup, err := q.EnqueueWithDedup(payload, "order-12345", 5*time.Minute)
+//	if err != nil { ... }
+//	if isDup {
+//	    // Message was already processed, offset is the original message
+//	}
+func (q *Queue) EnqueueWithDedup(payload []byte, dedupID string, window time.Duration) (uint64, bool, error) {
+	start := time.Now()
+
+	// Validate dedup ID
+	if dedupID == "" {
+		return 0, false, fmt.Errorf("deduplication ID cannot be empty")
+	}
+
+	// Validate message size before acquiring lock
+	if err := validateMessageSize(payload, q.opts.MaxMessageSize); err != nil {
+		return 0, false, err
+	}
+
+	// Determine deduplication window
+	if window == 0 {
+		window = q.opts.DefaultDeduplicationWindow
+	}
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.closed {
+		q.opts.MetricsCollector.RecordEnqueueError()
+		return 0, false, fmt.Errorf("queue is closed")
+	}
+
+	// Check for duplicate (if dedup is enabled)
+	if q.dedupTracker != nil {
+		if existingOffset, isDup := q.dedupTracker.Check(dedupID, window); isDup {
+			q.opts.Logger.Debug("duplicate message detected",
+				logging.F("dedup_id", dedupID),
+				logging.F("original_offset", existingOffset),
+			)
+			return existingOffset, true, nil
+		}
+	}
+
+	msgID := q.nextMsgID
+
+	// Apply compression if default compression is enabled
+	compressedPayload, compressionType, err := compressPayloadIfNeeded(
+		payload,
+		q.opts.DefaultCompression,
+		q.opts.CompressionLevel,
+		q.opts.MinCompressionSize,
+		q.opts.Logger,
+	)
+	if err != nil {
+		q.opts.MetricsCollector.RecordEnqueueError()
+		q.opts.Logger.Error("compression failed",
+			logging.F("msg_id", msgID),
+			logging.F("dedup_id", dedupID),
+			logging.F("error", err.Error()),
+		)
+		return 0, false, fmt.Errorf("failed to compress payload: %w", err)
+	}
+
+	// Create entry
+	entry := &format.Entry{
+		Type:        format.EntryTypeData,
+		Flags:       format.EntryFlagNone,
+		MsgID:       msgID,
+		Timestamp:   time.Now().UnixNano(),
+		Compression: compressionType,
+		Payload:     compressedPayload,
+	}
+
+	// Write to segment
+	offset, err := q.segments.Write(entry)
+	if err != nil {
+		q.opts.MetricsCollector.RecordEnqueueError()
+		q.opts.Logger.Error("enqueue with dedup failed",
+			logging.F("msg_id", msgID),
+			logging.F("dedup_id", dedupID),
+			logging.F("error", err.Error()),
+		)
+		return 0, false, fmt.Errorf("failed to write entry: %w", err)
+	}
+
+	// Track for deduplication (if enabled)
+	if q.dedupTracker != nil {
+		if err := q.dedupTracker.Track(dedupID, msgID, offset, window); err != nil {
+			// Log error but don't fail the enqueue since message is already written
+			q.opts.Logger.Error("failed to track deduplication",
+				logging.F("msg_id", msgID),
+				logging.F("offset", offset),
+				logging.F("dedup_id", dedupID),
+				logging.F("error", err.Error()),
+			)
+		}
+	}
+
+	// Add to priority index if priority mode is enabled
+	if q.opts.EnablePriorities && q.priorityIndex != nil {
+		position := uint32(offset) //nolint:gosec // G115: Offset won't exceed uint32 in practice
+		q.priorityIndex.Insert(offset, position, entry.Priority, entry.Timestamp)
+	}
+
+	// Increment message ID
+	q.nextMsgID++
+
+	// Update metadata
+	if err := q.metadata.SetNextMsgID(q.nextMsgID); err != nil {
+		return offset, false, fmt.Errorf("failed to update metadata: %w", err)
+	}
+
+	// Sync if auto-sync is enabled
+	if q.opts.AutoSync {
+		if err := q.segments.Sync(); err != nil {
+			return offset, false, fmt.Errorf("failed to sync: %w", err)
+		}
+	}
+
+	q.opts.Logger.Debug("message enqueued with deduplication",
+		logging.F("msg_id", msgID),
+		logging.F("offset", offset),
+		logging.F("payload_size", len(payload)),
+		logging.F("dedup_id", dedupID),
+		logging.F("window", window.String()),
+	)
+
+	// Record metrics
+	q.opts.MetricsCollector.RecordEnqueue(len(payload), time.Since(start))
+
+	return offset, false, nil
+}
+
 // EnqueueWithCompression appends a message with explicit compression (v1.3.0+).
 // This allows overriding the queue's DefaultCompression setting for individual messages.
 // Returns the offset where the message was written.

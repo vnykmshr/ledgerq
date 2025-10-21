@@ -38,7 +38,7 @@ import (
 
 // Version is the current version of LedgerQ.
 // This is the single source of truth for the application version.
-const Version = "1.3.0"
+const Version = "1.4.0"
 
 // Priority represents the priority level of a message.
 type Priority uint8
@@ -189,6 +189,16 @@ type Options struct {
 	// Default: 1024 bytes (1KB)
 	MinCompressionSize int
 
+	// DefaultDeduplicationWindow is the default time window for dedup tracking (v1.4.0+)
+	// Set to 0 to disable deduplication by default
+	// Default: 0 (disabled)
+	DefaultDeduplicationWindow time.Duration
+
+	// MaxDeduplicationEntries is the maximum number of dedup entries to track (v1.4.0+)
+	// Prevents unbounded memory growth
+	// Default: 100,000 entries (~6.4 MB)
+	MaxDeduplicationEntries int
+
 	// Logger for structured logging (nil = no logging)
 	// Default: no logging
 	Logger Logger
@@ -304,6 +314,9 @@ type Stats struct {
 
 	// RetryTrackedMessages is the number of messages currently being tracked for retries
 	RetryTrackedMessages int
+
+	// DedupTrackedEntries is the number of active dedup entries (v1.4.0+)
+	DedupTrackedEntries int
 }
 
 // CompactionResult contains the result of a compaction operation.
@@ -368,23 +381,25 @@ func Open(dir string, opts *Options) (*Queue, error) {
 		}
 
 		qopts = &queue.Options{
-			SegmentOptions:           convertSegmentOptions(dir, opts),
-			AutoSync:                 opts.AutoSync,
-			SyncInterval:             opts.SyncInterval,
-			CompactionInterval:       opts.CompactionInterval,
-			EnablePriorities:         opts.EnablePriorities,
-			PriorityStarvationWindow: opts.PriorityStarvationWindow,
-			DLQPath:                  opts.DLQPath,
-			MaxRetries:               opts.MaxRetries,
-			MaxMessageSize:           opts.MaxMessageSize,
-			MinFreeDiskSpace:         opts.MinFreeDiskSpace,
-			DLQMaxAge:                opts.DLQMaxAge,
-			DLQMaxSize:               opts.DLQMaxSize,
-			DefaultCompression:       format.CompressionType(opts.DefaultCompression),
-			CompressionLevel:         opts.CompressionLevel,
-			MinCompressionSize:       opts.MinCompressionSize,
-			Logger:                   convertLogger(opts.Logger),
-			MetricsCollector:         metricsCollector,
+			SegmentOptions:             convertSegmentOptions(dir, opts),
+			AutoSync:                   opts.AutoSync,
+			SyncInterval:               opts.SyncInterval,
+			CompactionInterval:         opts.CompactionInterval,
+			EnablePriorities:           opts.EnablePriorities,
+			PriorityStarvationWindow:   opts.PriorityStarvationWindow,
+			DLQPath:                    opts.DLQPath,
+			MaxRetries:                 opts.MaxRetries,
+			MaxMessageSize:             opts.MaxMessageSize,
+			MinFreeDiskSpace:           opts.MinFreeDiskSpace,
+			DLQMaxAge:                  opts.DLQMaxAge,
+			DLQMaxSize:                 opts.DLQMaxSize,
+			DefaultCompression:         format.CompressionType(opts.DefaultCompression),
+			CompressionLevel:           opts.CompressionLevel,
+			MinCompressionSize:         opts.MinCompressionSize,
+			DefaultDeduplicationWindow: opts.DefaultDeduplicationWindow,
+			MaxDeduplicationEntries:    opts.MaxDeduplicationEntries,
+			Logger:                     convertLogger(opts.Logger),
+			MetricsCollector:           metricsCollector,
 		}
 	}
 
@@ -436,6 +451,29 @@ func (q *Queue) EnqueueWithPriority(payload []byte, priority Priority) (uint64, 
 // Returns the offset where the message was written.
 func (q *Queue) EnqueueWithCompression(payload []byte, compression CompressionType) (uint64, error) {
 	return q.q.EnqueueWithCompression(payload, format.CompressionType(compression))
+}
+
+// EnqueueWithDedup appends a message with deduplication tracking (v1.4.0+).
+// If a message with the same dedupID was enqueued within the deduplication window,
+// this returns the original message ID and offset without writing a duplicate.
+// Returns (offset, isDuplicate, error).
+//
+// dedupID: A unique identifier for this message (e.g., order ID, request ID)
+// window: How long to track this message for deduplication (0 = use queue default)
+//
+// Example:
+//
+//	offset, isDup, err := q.EnqueueWithDedup(payload, "order-12345", 5*time.Minute)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	if isDup {
+//	    log.Printf("Duplicate message detected, original at offset %d", offset)
+//	} else {
+//	    log.Printf("New message enqueued at offset %d", offset)
+//	}
+func (q *Queue) EnqueueWithDedup(payload []byte, dedupID string, window time.Duration) (uint64, bool, error) {
+	return q.q.EnqueueWithDedup(payload, dedupID, window)
 }
 
 // EnqueueWithAllOptions appends a message with priority, TTL, headers, and compression (v1.1.0+, v1.3.0+).
@@ -597,6 +635,7 @@ func (q *Queue) Stats() *Stats {
 		DLQMessages:          stats.DLQMessages,
 		DLQPendingMessages:   stats.DLQPendingMessages,
 		RetryTrackedMessages: stats.RetryTrackedMessages,
+		DedupTrackedEntries:  stats.DedupTrackedEntries,
 	}
 }
 
