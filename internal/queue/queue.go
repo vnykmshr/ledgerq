@@ -83,6 +83,8 @@ type Queue struct {
 
 // Open opens or creates a queue at the specified directory.
 // Creates the directory if it doesn't exist.
+//
+//nolint:gocyclo // Initialization requires multiple steps and conditional logic
 func Open(dir string, opts *Options) (*Queue, error) {
 	if opts == nil {
 		opts = DefaultOptions(dir)
