@@ -23,7 +23,8 @@ func main() {
 	queueDir := "/tmp/ledgerq-dedup-example"
 	defer os.RemoveAll(queueDir)
 
-	fmt.Println("=== LedgerQ Message Deduplication Example ===\n")
+	fmt.Println("=== LedgerQ Message Deduplication Example ===")
+	fmt.Println()
 
 	// Configure queue with deduplication enabled
 	opts := &ledgerq.Options{
