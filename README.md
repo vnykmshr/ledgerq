@@ -2,8 +2,12 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/vnykmshr/ledgerq.svg)](https://pkg.go.dev/github.com/vnykmshr/ledgerq/pkg/ledgerq)
+[![Feature Complete](https://img.shields.io/badge/status-feature--complete-success.svg)](https://github.com/vnykmshr/ledgerq/releases/tag/v1.4.0)
+[![Go Version](https://img.shields.io/badge/go-%3E%3D1.23-blue.svg)](https://golang.org/dl/)
 
-A disk-backed message queue with segment-based storage, TTL support, and priority ordering - written in pure Go with zero dependencies.
+A production-ready, disk-backed message queue for single-node applications - written in pure Go with zero dependencies.
+
+**Feature-complete as of v1.4.0** - LedgerQ focuses on being excellent at local message queuing rather than trying to replace distributed systems like Kafka.
 
 ## Features
 
@@ -25,20 +29,47 @@ A disk-backed message queue with segment-based storage, TTL support, and priorit
 
 **Single-node message queue with disk durability.** No network, no clustering, no external dependencies. If you're building CLI tools, desktop apps, or edge devices that need crash-safe task queues, LedgerQ stores messages on disk using an append-only log.
 
-**Use cases:**
-- Offline-first applications (mobile sync, desktop apps)
-- Local task processing (CI/CD pipelines, backup jobs)
-- Event sourcing and audit trails
-- IoT/edge devices with limited connectivity
-- Development and testing (simpler than running Kafka locally)
+### When to Use LedgerQ
 
-**Trade-offs:**
+**Perfect for:**
+- **Offline-first applications** - Mobile sync, desktop apps that work without network
+- **Local task processing** - CI/CD pipelines, backup jobs, batch processing
+- **Edge/IoT devices** - Limited connectivity, single-node operation
+- **Event sourcing** - Local audit trails and event logs
+- **Development/testing** - Simpler than running Kafka/RabbitMQ locally
+- **Embedded systems** - Zero external dependencies, small footprint
+
+### When NOT to Use LedgerQ
+
+**Use these instead:**
+- **Need multiple consumers on different machines?** → Use **Kafka** (distributed streaming)
+- **Need pub/sub fan-out patterns?** → Use **NATS** or **RabbitMQ** (message broker)
+- **Need distributed consensus?** → Use **Kafka** or **Pulsar** (distributed log)
+- **Need cross-language support via HTTP?** → Use **RabbitMQ** or **ActiveMQ** (AMQP/STOMP)
+- **Already using a database?** → Use **PostgreSQL LISTEN/NOTIFY** or **Redis Streams**
+
+### Comparison
+
+| Feature | LedgerQ | Kafka | NATS | RabbitMQ |
+|---------|---------|-------|------|----------|
+| **Deployment** | Single binary | Cluster (ZooKeeper/KRaft) | Single/Cluster | Single/Cluster |
+| **Dependencies** | None | Java, ZooKeeper | None | Erlang |
+| **Consumer Model** | Single reader | Consumer groups | Subjects/Queues | Queues/Exchanges |
+| **Use Case** | Local queuing | Distributed streaming | Lightweight messaging | Enterprise messaging |
+| **Setup Time** | Instant | Hours | Minutes | Minutes |
+
+**LedgerQ's sweet spot**: You need reliability without the operational overhead of distributed systems.
+
+### Trade-offs
+
 - ✅ Zero config, just a directory path
 - ✅ Survives crashes and reboots
 - ✅ Fast sequential I/O (append-only)
+- ✅ No network protocols or ports
+- ✅ Embeddable in any Go application
 - ❌ Single process only (file locking)
-- ❌ Not distributed (use Kafka/NATS for multi-node)
-- ❌ No pub/sub (single consumer reads FIFO)
+- ❌ Not distributed (single node)
+- ❌ Single consumer (FIFO order)
 
 ## Quick Start
 
