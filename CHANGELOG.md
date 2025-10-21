@@ -11,6 +11,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.0] - 2025-10-21
+
+### Added
+
+#### Message Deduplication (Idempotency)
+- **Hash-Based Deduplication** - Prevent duplicate message processing with SHA-256 tracking
+  - O(1) duplicate detection using cryptographic hashing
+  - Time-windowed tracking with configurable expiration
+  - Bounded memory with configurable max entries (default: 100K = ~6.4 MB)
+  - Crash-safe JSON persistence using atomic writes
+  - Background cleanup every 10 seconds
+
+- **New API Features**:
+  - `Queue.EnqueueWithDedup(payload, dedupID, window)` - Returns `(offset, isDuplicate, error)`
+  - Queue options: `DefaultDeduplicationWindow`, `MaxDeduplicationEntries`
+  - `Stats.DedupTrackedEntries` - Number of active dedup entries
+  - Per-message window override (0 = use queue default)
+
+- **Deduplication Behavior**:
+  - Zero overhead when disabled (dedupTracker = nil)
+  - Returns original message offset for duplicates
+  - Exactly-once semantics for message processing
+  - Perfect for DLQ requeue safety (prevents duplicate processing)
+  - Expired entries automatically cleaned up
+
+- **Persistence**:
+  - State persists across queue restarts
+  - Atomic writes using temp file + rename pattern
+  - Expired entries skipped during save/load
+  - State file: `.dedup_state.json` in queue directory
+
+- **New Example**: `examples/deduplication/` - Comprehensive deduplication demonstration
+  - Basic duplicate detection
+  - Custom time windows
+  - Idempotent message processing
+  - Persistence across restarts
+  - Statistics and monitoring
+
+### Performance
+- **Memory**: ~64 bytes per tracked message (100K entries ≈ 6.4 MB)
+- **Check Operation**: ~573 ns/op (O(1) hash lookup)
+- **Track Operation**: ~886 ns/op (O(1) hash insert)
+- **Cleanup**: ~346 ns/op per entry
+
+### Testing
+- 13 unit tests for DedupTracker core
+- 7 integration tests for end-to-end flows
+- Full race detector coverage
+- Benchmark suite included
+
+---
+
 ## [1.3.0] - 2025-10-20
 
 ### Added

@@ -13,6 +13,7 @@ A disk-backed message queue with segment-based storage, TTL support, and priorit
 - **Priority queue support (v1.1.0+)** with starvation prevention
 - **Dead Letter Queue (DLQ) support (v1.2.0+)** for failed message handling
 - **Payload compression (v1.3.0+)** with GZIP to reduce disk usage
+- **Message deduplication (v1.4.0+)** for exactly-once semantics
 - Replay from message ID or timestamp
 - Message TTL and headers
 - Metrics and pluggable logging
@@ -120,6 +121,31 @@ q.Enqueue(largePayload)  // Compressed if >= 1KB
 
 // Or control compression per-message
 q.EnqueueWithCompression(payload, ledgerq.CompressionGzip)
+```
+
+**Message deduplication (v1.4.0+):**
+
+```go
+// Enable deduplication with a 5-minute window
+opts := ledgerq.DefaultOptions("/tmp/myqueue")
+opts.DefaultDeduplicationWindow = 5 * time.Minute
+opts.MaxDeduplicationEntries = 100000  // Max 100K unique messages tracked
+q, _ := ledgerq.Open("/tmp/myqueue", opts)
+
+// Enqueue with deduplication
+offset, isDup, _ := q.EnqueueWithDedup(payload, "order-12345", 0)
+if isDup {
+    fmt.Printf("Duplicate detected! Original at offset %d\n", offset)
+} else {
+    fmt.Printf("New message enqueued at offset %d\n", offset)
+}
+
+// Custom per-message window
+q.EnqueueWithDedup(payload, "request-789", 10*time.Minute)
+
+// View deduplication statistics
+stats := q.Stats()
+fmt.Printf("Tracked entries: %d\n", stats.DedupTrackedEntries)
 ```
 
 **Priority queue (v1.1.0+):**

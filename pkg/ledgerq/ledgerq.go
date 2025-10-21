@@ -38,7 +38,7 @@ import (
 
 // Version is the current version of LedgerQ.
 // This is the single source of truth for the application version.
-const Version = "1.3.0"
+const Version = "1.4.0"
 
 // Priority represents the priority level of a message.
 type Priority uint8
