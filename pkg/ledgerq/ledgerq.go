@@ -29,6 +29,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/vnykmshr/ledgerq/internal/format"
 	"github.com/vnykmshr/ledgerq/internal/logging"
 	"github.com/vnykmshr/ledgerq/internal/metrics"
 	"github.com/vnykmshr/ledgerq/internal/queue"
@@ -37,7 +38,7 @@ import (
 
 // Version is the current version of LedgerQ.
 // This is the single source of truth for the application version.
-const Version = "1.2.1"
+const Version = "1.3.0"
 
 // Priority represents the priority level of a message.
 type Priority uint8
@@ -51,6 +52,17 @@ const (
 
 	// PriorityHigh gives messages the highest precedence.
 	PriorityHigh Priority = 2
+)
+
+// CompressionType represents the compression algorithm used for message payloads.
+type CompressionType uint8
+
+const (
+	// CompressionNone indicates no compression (default).
+	CompressionNone CompressionType = 0
+
+	// CompressionGzip indicates GZIP compression using stdlib compress/gzip.
+	CompressionGzip CompressionType = 1
 )
 
 // Queue represents a persistent message queue.
@@ -160,6 +172,23 @@ type Options struct {
 	// Default: 0 (no size limit)
 	DLQMaxSize int64
 
+	// DefaultCompression is the compression type used when not explicitly specified (v1.3.0+)
+	// Set to CompressionNone to disable compression by default
+	// Default: CompressionNone (no compression)
+	DefaultCompression CompressionType
+
+	// CompressionLevel is the compression level for algorithms that support it (v1.3.0+)
+	// For GZIP: 1 (fastest) to 9 (best compression), 0 = default (6)
+	// Higher values = better compression but slower
+	// Default: 0 (use algorithm default)
+	CompressionLevel int
+
+	// MinCompressionSize is the minimum payload size to compress (v1.3.0+)
+	// Messages smaller than this are not compressed even if compression is requested
+	// This avoids the CPU overhead when compression doesn't help much
+	// Default: 1024 bytes (1KB)
+	MinCompressionSize int
+
 	// Logger for structured logging (nil = no logging)
 	// Default: no logging
 	Logger Logger
@@ -183,6 +212,11 @@ type EnqueueOptions struct {
 	// Headers contains key-value metadata for the message
 	// Default: nil
 	Headers map[string]string
+
+	// Compression is the compression type for the message (v1.3.0+)
+	// Set to CompressionNone to use queue's DefaultCompression
+	// Default: CompressionNone (uses queue default)
+	Compression CompressionType
 }
 
 // MetricsCollector defines the interface for recording queue metrics.
@@ -346,6 +380,9 @@ func Open(dir string, opts *Options) (*Queue, error) {
 			MinFreeDiskSpace:         opts.MinFreeDiskSpace,
 			DLQMaxAge:                opts.DLQMaxAge,
 			DLQMaxSize:               opts.DLQMaxSize,
+			DefaultCompression:       format.CompressionType(opts.DefaultCompression),
+			CompressionLevel:         opts.CompressionLevel,
+			MinCompressionSize:       opts.MinCompressionSize,
 			Logger:                   convertLogger(opts.Logger),
 			MetricsCollector:         metricsCollector,
 		}
@@ -394,11 +431,32 @@ func (q *Queue) EnqueueWithPriority(payload []byte, priority Priority) (uint64, 
 	return q.q.EnqueueWithPriority(payload, uint8(priority))
 }
 
-// EnqueueWithAllOptions appends a message with priority, TTL, and headers (v1.1.0+).
+// EnqueueWithCompression appends a message with explicit compression (v1.3.0+).
+// This allows overriding the queue's DefaultCompression setting for individual messages.
+// Returns the offset where the message was written.
+func (q *Queue) EnqueueWithCompression(payload []byte, compression CompressionType) (uint64, error) {
+	return q.q.EnqueueWithCompression(payload, format.CompressionType(compression))
+}
+
+// EnqueueWithAllOptions appends a message with priority, TTL, headers, and compression (v1.1.0+, v1.3.0+).
 // This is the most flexible enqueue method, combining all available features.
 // Returns the offset where the message was written.
 func (q *Queue) EnqueueWithAllOptions(payload []byte, opts EnqueueOptions) (uint64, error) {
-	return q.q.EnqueueWithAllOptions(payload, uint8(opts.Priority), opts.TTL, opts.Headers)
+	// Map public options to internal batch options
+	batchOpts := []queue.BatchEnqueueOptions{
+		{
+			Payload:     payload,
+			Priority:    uint8(opts.Priority),
+			TTL:         opts.TTL,
+			Headers:     opts.Headers,
+			Compression: format.CompressionType(opts.Compression),
+		},
+	}
+	offsets, err := q.q.EnqueueBatchWithOptions(batchOpts)
+	if err != nil {
+		return 0, err
+	}
+	return offsets[0], nil
 }
 
 // EnqueueBatch appends multiple messages to the queue in a single operation.
@@ -410,7 +468,7 @@ func (q *Queue) EnqueueBatch(payloads [][]byte) ([]uint64, error) {
 	return q.q.EnqueueBatch(payloads)
 }
 
-// BatchEnqueueOptions contains options for enqueueing a single message in a batch operation (v1.1.0+).
+// BatchEnqueueOptions contains options for enqueueing a single message in a batch operation (v1.1.0+, v1.3.0+).
 type BatchEnqueueOptions struct {
 	// Payload is the message data
 	Payload []byte
@@ -427,6 +485,11 @@ type BatchEnqueueOptions struct {
 	// Headers contains key-value metadata for the message
 	// Default: nil
 	Headers map[string]string
+
+	// Compression is the compression type for the message (v1.3.0+)
+	// Set to CompressionNone to use queue's DefaultCompression
+	// Default: CompressionNone (uses queue default)
+	Compression CompressionType
 }
 
 // EnqueueBatchWithOptions appends multiple messages with individual options to the queue (v1.1.0+).
@@ -438,10 +501,11 @@ func (q *Queue) EnqueueBatchWithOptions(messages []BatchEnqueueOptions) ([]uint6
 	internalMessages := make([]queue.BatchEnqueueOptions, len(messages))
 	for i, msg := range messages {
 		internalMessages[i] = queue.BatchEnqueueOptions{
-			Payload:  msg.Payload,
-			Priority: uint8(msg.Priority),
-			TTL:      msg.TTL,
-			Headers:  msg.Headers,
+			Payload:     msg.Payload,
+			Priority:    uint8(msg.Priority),
+			TTL:         msg.TTL,
+			Headers:     msg.Headers,
+			Compression: format.CompressionType(msg.Compression),
 		}
 	}
 

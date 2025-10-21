@@ -31,13 +31,31 @@ func (q *Queue) Enqueue(payload []byte) (uint64, error) {
 
 	msgID := q.nextMsgID
 
+	// Apply compression if default compression is enabled
+	compressedPayload, compressionType, err := compressPayloadIfNeeded(
+		payload,
+		q.opts.DefaultCompression,
+		q.opts.CompressionLevel,
+		q.opts.MinCompressionSize,
+		q.opts.Logger,
+	)
+	if err != nil {
+		q.opts.MetricsCollector.RecordEnqueueError()
+		q.opts.Logger.Error("compression failed",
+			logging.F("msg_id", msgID),
+			logging.F("error", err.Error()),
+		)
+		return 0, fmt.Errorf("failed to compress payload: %w", err)
+	}
+
 	// Create entry
 	entry := &format.Entry{
-		Type:      format.EntryTypeData,
-		Flags:     format.EntryFlagNone,
-		MsgID:     msgID,
-		Timestamp: time.Now().UnixNano(),
-		Payload:   payload,
+		Type:        format.EntryTypeData,
+		Flags:       format.EntryFlagNone,
+		MsgID:       msgID,
+		Timestamp:   time.Now().UnixNano(),
+		Compression: compressionType,
+		Payload:     compressedPayload,
 	}
 
 	// Write to segment
@@ -609,6 +627,11 @@ type BatchEnqueueOptions struct {
 	// Headers contains key-value metadata for the message
 	// Default: nil
 	Headers map[string]string
+
+	// Compression is the compression type for the message (v1.3.0+)
+	// Set to CompressionNone to use queue's DefaultCompression
+	// Default: CompressionNone (uses queue default)
+	Compression format.CompressionType
 }
 
 // EnqueueBatchWithOptions appends multiple messages with individual options to the queue.
@@ -649,13 +672,35 @@ func (q *Queue) EnqueueBatchWithOptions(messages []BatchEnqueueOptions) ([]uint6
 
 	// Write all entries
 	for i, msg := range messages {
+		// Determine compression: use per-message setting or queue default
+		compression := msg.Compression
+		if compression == format.CompressionNone {
+			compression = q.opts.DefaultCompression
+		}
+
+		// Apply compression
+		compressedPayload, compressionType, err := compressPayloadIfNeeded(
+			msg.Payload,
+			compression,
+			q.opts.CompressionLevel,
+			q.opts.MinCompressionSize,
+			q.opts.Logger,
+		)
+		if err != nil {
+			// On error, sync what we've written so far
+			_ = q.segments.Sync()
+			q.opts.MetricsCollector.RecordEnqueueError()
+			return offsets[:i], fmt.Errorf("failed to compress entry %d: %w", i, err)
+		}
+
 		entry := &format.Entry{
-			Type:      format.EntryTypeData,
-			Flags:     format.EntryFlagNone,
-			MsgID:     q.nextMsgID,
-			Timestamp: timestamp,
-			Priority:  msg.Priority,
-			Payload:   msg.Payload,
+			Type:        format.EntryTypeData,
+			Flags:       format.EntryFlagNone,
+			MsgID:       q.nextMsgID,
+			Timestamp:   timestamp,
+			Priority:    msg.Priority,
+			Compression: compressionType,
+			Payload:     compressedPayload,
 		}
 
 		// Set TTL if specified
@@ -709,4 +754,105 @@ func (q *Queue) EnqueueBatchWithOptions(messages []BatchEnqueueOptions) ([]uint6
 	q.opts.MetricsCollector.RecordEnqueueBatch(len(messages), totalBytes, time.Since(start))
 
 	return offsets, nil
+}
+
+// EnqueueWithCompression appends a message with explicit compression (v1.3.0+).
+// This allows overriding the queue's DefaultCompression setting for individual messages.
+// Returns the offset where the message was written.
+func (q *Queue) EnqueueWithCompression(payload []byte, compression format.CompressionType) (uint64, error) {
+	start := time.Now()
+
+	// Validate message size before acquiring lock
+	if err := validateMessageSize(payload, q.opts.MaxMessageSize); err != nil {
+		return 0, err
+	}
+
+	// Validate compression type
+	if compression != format.CompressionNone && compression != format.CompressionGzip {
+		return 0, fmt.Errorf("invalid compression type: %d", compression)
+	}
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.closed {
+		q.opts.MetricsCollector.RecordEnqueueError()
+		return 0, fmt.Errorf("queue is closed")
+	}
+
+	msgID := q.nextMsgID
+
+	// Apply compression
+	compressedPayload, compressionType, err := compressPayloadIfNeeded(
+		payload,
+		compression,
+		q.opts.CompressionLevel,
+		q.opts.MinCompressionSize,
+		q.opts.Logger,
+	)
+	if err != nil {
+		q.opts.MetricsCollector.RecordEnqueueError()
+		q.opts.Logger.Error("compression failed",
+			logging.F("msg_id", msgID),
+			logging.F("compression_type", compression.String()),
+			logging.F("error", err.Error()),
+		)
+		return 0, fmt.Errorf("failed to compress payload: %w", err)
+	}
+
+	// Create entry
+	entry := &format.Entry{
+		Type:        format.EntryTypeData,
+		Flags:       format.EntryFlagNone,
+		MsgID:       msgID,
+		Timestamp:   time.Now().UnixNano(),
+		Compression: compressionType,
+		Payload:     compressedPayload,
+	}
+
+	// Write to segment
+	offset, err := q.segments.Write(entry)
+	if err != nil {
+		q.opts.MetricsCollector.RecordEnqueueError()
+		q.opts.Logger.Error("enqueue with compression failed",
+			logging.F("msg_id", msgID),
+			logging.F("compression_type", compressionType.String()),
+			logging.F("error", err.Error()),
+		)
+		return 0, fmt.Errorf("failed to write entry: %w", err)
+	}
+
+	// Add to priority index if priority mode is enabled
+	if q.opts.EnablePriorities && q.priorityIndex != nil {
+		position := uint32(offset) //nolint:gosec // G115: Offset won't exceed uint32 in practice
+		q.priorityIndex.Insert(offset, position, entry.Priority, entry.Timestamp)
+	}
+
+	// Increment message ID
+	q.nextMsgID++
+
+	// Update metadata
+	if err := q.metadata.SetNextMsgID(q.nextMsgID); err != nil {
+		return offset, fmt.Errorf("failed to update metadata: %w", err)
+	}
+
+	// Sync if auto-sync is enabled
+	if q.opts.AutoSync {
+		if err := q.segments.Sync(); err != nil {
+			return offset, fmt.Errorf("failed to sync: %w", err)
+		}
+	}
+
+	q.opts.Logger.Debug("message enqueued with compression",
+		logging.F("msg_id", msgID),
+		logging.F("offset", offset),
+		logging.F("original_size", len(payload)),
+		logging.F("stored_size", len(compressedPayload)),
+		logging.F("compression_type", compressionType.String()),
+	)
+
+	// Record metrics
+	q.opts.MetricsCollector.RecordEnqueue(len(payload), time.Since(start))
+
+	return offset, nil
 }

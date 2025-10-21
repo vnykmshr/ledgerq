@@ -38,18 +38,19 @@ const EntryHeaderSize = 22
 //
 // Binary format (little-endian):
 //
-//	[Length:4][Type:1][Flags:1][MsgID:8][Timestamp:8][Priority:1?][ExpiresAt:8?][HeadersSize:2?][Headers:N?][Payload:N][CRC32C:4]
+//	[Length:4][Type:1][Flags:1][MsgID:8][Timestamp:8][Priority:1?][ExpiresAt:8?][HeadersSize:2?][Headers:N?][Compression:1?][Payload:N][CRC32C:4]
 //
 // Optional fields (included based on flags):
 //   - Priority (1 byte): Present if EntryFlagPriority is set (v1.1.0+)
 //   - ExpiresAt (8 bytes): Present if EntryFlagTTL is set
 //   - HeadersSize (2 bytes) + Headers (N bytes): Present if EntryFlagHeaders is set
+//   - Compression (1 byte): Present if EntryFlagCompressed is set (v1.3.0+)
 //
 // Headers encoding:
 //
 //	[NumHeaders:2][Key1Len:2][Key1:N][Value1Len:2][Value1:N]...[KeyNLen:2][KeyN:N][ValueNLen:2][ValueN:N]
 //
-// Total header size: 22 bytes (base) + 1 (Priority) + 8 (TTL) + 2+N (Headers)
+// Total header size: 22 bytes (base) + 1 (Priority) + 8 (TTL) + 2+N (Headers) + 1 (Compression)
 type Entry struct {
 	// Length is the total size of the entry including header and CRC (excludes the length field itself)
 	Length uint32
@@ -79,7 +80,12 @@ type Entry struct {
 	// Only serialized if EntryFlagHeaders is set
 	Headers map[string]string
 
-	// Payload is the message data
+	// Compression is the compression algorithm used for the payload (v1.3.0+)
+	// Only serialized if EntryFlagCompressed is set
+	// Defaults to CompressionNone for backward compatibility
+	Compression CompressionType
+
+	// Payload is the message data (may be compressed if Compression != CompressionNone)
 	Payload []byte
 }
 
@@ -186,6 +192,11 @@ func (e *Entry) Marshal() []byte {
 		e.Flags |= EntryFlagHeaders
 	}
 
+	// Set Compressed flag if compression is used
+	if e.Compression != CompressionNone {
+		e.Flags |= EntryFlagCompressed
+	}
+
 	// Calculate total length including optional fields
 	headerSize := EntryHeaderSize
 	if e.Flags&EntryFlagPriority != 0 {
@@ -200,6 +211,11 @@ func (e *Entry) Marshal() []byte {
 	if e.Flags&EntryFlagHeaders != 0 {
 		headersData = encodeHeaders(e.Headers)
 		headerSize += len(headersData)
+	}
+
+	// Add compression byte if present
+	if e.Flags&EntryFlagCompressed != 0 {
+		headerSize += 1 // Add 1 byte for Compression
 	}
 
 	totalLen := 4 + headerSize + len(e.Payload) + 4 // length field + header + payload + crc
@@ -238,6 +254,12 @@ func (e *Entry) Marshal() []byte {
 	if e.Flags&EntryFlagHeaders != 0 {
 		copy(buf[offset:], headersData)
 		offset += len(headersData)
+	}
+
+	// Write compression type if flag is set
+	if e.Flags&EntryFlagCompressed != 0 {
+		buf[offset] = uint8(e.Compression)
+		offset++
 	}
 
 	// Write payload
@@ -284,12 +306,13 @@ func Unmarshal(r io.Reader) (*Entry, error) {
 
 	// Parse entry fields
 	entry := &Entry{
-		Length:    length,
-		Type:      buf[4],
-		Flags:     buf[5],
-		MsgID:     binary.LittleEndian.Uint64(buf[6:14]),
-		Timestamp: int64(binary.LittleEndian.Uint64(buf[14:22])), //nolint:gosec // G115: Safe int64 conversion
-		Priority:  PriorityLow,                                   // Default for backward compatibility
+		Length:      length,
+		Type:        buf[4],
+		Flags:       buf[5],
+		MsgID:       binary.LittleEndian.Uint64(buf[6:14]),
+		Timestamp:   int64(binary.LittleEndian.Uint64(buf[14:22])), //nolint:gosec // G115: Safe int64 conversion
+		Priority:    PriorityLow,                                   // Default for backward compatibility
+		Compression: CompressionNone,                              // Default for backward compatibility
 	}
 
 	// Parse Priority if flag is set
@@ -326,7 +349,16 @@ func Unmarshal(r io.Reader) (*Entry, error) {
 		offset += bytesRead
 	}
 
-	// Extract payload (everything between headers and CRC)
+	// Parse Compression if flag is set
+	if entry.Flags&EntryFlagCompressed != 0 {
+		if offset >= len(buf)-4 {
+			return nil, fmt.Errorf("entry has Compressed flag but insufficient data for compression type")
+		}
+		entry.Compression = CompressionType(buf[offset])
+		offset++
+	}
+
+	// Extract payload (everything between compression and CRC)
 	payloadStart := offset
 	payloadEnd := len(buf) - 4 // Exclude CRC
 	if payloadEnd > payloadStart {
@@ -381,6 +413,15 @@ func (e *Entry) Validate() error {
 	if e.Flags&EntryFlagHeaders != 0 {
 		headersData := encodeHeaders(e.Headers)
 		headerSize += len(headersData)
+	}
+
+	// Add compression byte if flag is set
+	if e.Flags&EntryFlagCompressed != 0 {
+		headerSize += 1
+		// Validate compression type
+		if e.Compression != CompressionNone && e.Compression != CompressionGzip {
+			return fmt.Errorf("invalid compression type: %d", e.Compression)
+		}
 	}
 
 	expectedLength := uint32(headerSize + len(e.Payload) + 4) //nolint:gosec // G115: Safe conversion, payload limited by file size

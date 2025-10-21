@@ -56,11 +56,12 @@ func TestEntry_Marshal_Unmarshal_Roundtrip(t *testing.T) {
 		{
 			name: "entry with compression flag",
 			entry: &Entry{
-				Type:      EntryTypeData,
-				Flags:     EntryFlagCompressed,
-				MsgID:     111111,
-				Timestamp: time.Now().UnixNano(),
-				Payload:   []byte("compressed-payload"),
+				Type:        EntryTypeData,
+				Flags:       EntryFlagCompressed,
+				MsgID:       111111,
+				Timestamp:   time.Now().UnixNano(),
+				Compression: CompressionGzip,
+				Payload:     []byte("compressed-payload"),
 			},
 		},
 	}
@@ -72,6 +73,10 @@ func TestEntry_Marshal_Unmarshal_Roundtrip(t *testing.T) {
 
 			// Verify total size
 			expectedSize := 4 + EntryHeaderSize + len(tt.entry.Payload) + 4
+			// Add compression byte if flag is set
+			if tt.entry.Flags&EntryFlagCompressed != 0 {
+				expectedSize += 1
+			}
 			if len(data) != expectedSize {
 				t.Errorf("marshaled size = %d, want %d", len(data), expectedSize)
 			}
