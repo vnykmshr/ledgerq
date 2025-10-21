@@ -230,8 +230,8 @@ func (q *Queue) getAllSegments() []*segment.SegmentInfo {
 func (q *Queue) selectNextPriorityMessage(now int64) (targetOffset uint64, targetPriority uint8) {
 	// Check for starvation prevention
 	if q.opts.PriorityStarvationWindow > 0 {
-		if offset, priority, found := q.checkStarvation(now); found {
-			return offset, priority
+		if offset, found := q.checkStarvation(now); found {
+			return offset, format.PriorityLow
 		}
 	}
 
@@ -246,10 +246,10 @@ func (q *Queue) selectNextPriorityMessage(now int64) (targetOffset uint64, targe
 }
 
 // checkStarvation checks if low-priority messages should be promoted due to starvation
-func (q *Queue) checkStarvation(now int64) (uint64, uint8, bool) {
+func (q *Queue) checkStarvation(now int64) (uint64, bool) {
 	lowEntry := q.priorityIndex.OldestInPriority(format.PriorityLow)
 	if lowEntry == nil {
-		return 0, 0, false
+		return 0, false
 	}
 
 	age := time.Duration(now - lowEntry.Timestamp)
@@ -257,10 +257,10 @@ func (q *Queue) checkStarvation(now int64) (uint64, uint8, bool) {
 		q.opts.Logger.Debug("promoting starved low-priority message",
 			logging.F("offset", lowEntry.Offset),
 			logging.F("age", age.String()))
-		return lowEntry.Offset, format.PriorityLow, true
+		return lowEntry.Offset, true
 	}
 
-	return 0, 0, false
+	return 0, false
 }
 
 // findEntryAtOffset searches for an entry at the specified offset across all segments
