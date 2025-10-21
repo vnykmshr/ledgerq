@@ -23,18 +23,22 @@ A disk-backed message queue with segment-based storage, TTL support, and priorit
 
 ## Why LedgerQ?
 
-For embedded or local-first applications that need something lighter than Kafka or NSQ, but more durable than in-memory channels.
+**Single-node message queue with disk durability.** No network, no clustering, no external dependencies. If you're building CLI tools, desktop apps, or edge devices that need crash-safe task queues, LedgerQ stores messages on disk using an append-only log.
 
-**Good for:**
-- Offline task queues
-- Event sourcing and audit logs
-- Local message buffering
-- Edge/IoT applications
+**Use cases:**
+- Offline-first applications (mobile sync, desktop apps)
+- Local task processing (CI/CD pipelines, backup jobs)
+- Event sourcing and audit trails
+- IoT/edge devices with limited connectivity
+- Development and testing (simpler than running Kafka locally)
 
-**Not for:**
-- Distributed systems (use Kafka, NATS)
-- Multi-node deployments
-- Multiple independent consumers
+**Trade-offs:**
+- ✅ Zero config, just a directory path
+- ✅ Survives crashes and reboots
+- ✅ Fast sequential I/O (append-only)
+- ❌ Single process only (file locking)
+- ❌ Not distributed (use Kafka/NATS for multi-node)
+- ❌ No pub/sub (single consumer reads FIFO)
 
 ## Quick Start
 
@@ -151,7 +155,7 @@ fmt.Printf("Tracked entries: %d\n", stats.DedupTrackedEntries)
 **Priority queue (v1.1.0+):**
 
 ```go
-// Enable priority mode
+// Enable priority mode (set at queue creation, cannot be changed later)
 opts := ledgerq.DefaultOptions("/tmp/myqueue")
 opts.EnablePriorities = true
 q, _ := ledgerq.Open("/tmp/myqueue", opts)
@@ -248,27 +252,58 @@ Use batch operations for high throughput.
 
 ## Examples
 
-See [examples/](examples/) for runnable code:
+See [examples/](examples/) for runnable code with comprehensive READMEs:
 
-- [simple](examples/simple) - Basic operations
-- [producer-consumer](examples/producer-consumer) - Multiple goroutines
-- [streaming](examples/streaming) - Streaming API
-- [ttl](examples/ttl) - Message expiration
-- [headers](examples/headers) - Message metadata
-- [replay](examples/replay) - Seeking and replay
-- [metrics](examples/metrics) - Metrics collection
-- **[priority](examples/priority) - Priority queue (v1.1.0+)**
-- **[dlq](examples/dlq) - Dead Letter Queue (v1.2.0+)**
+**Getting Started:**
+- [simple](examples/simple) - Basic operations ⭐ **Start here!**
+- [producer-consumer](examples/producer-consumer) - Concurrent access with multiple goroutines
+
+**Core Features:**
+- [ttl](examples/ttl) - Message expiration (time-to-live)
+- [headers](examples/headers) - Message metadata and routing
+- [replay](examples/replay) - Seeking and time-travel through message history
+- [streaming](examples/streaming) - Real-time event streaming
+- [metrics](examples/metrics) - Monitoring and observability
+
+**Advanced Features (v1.1.0+):**
+- **[priority](examples/priority)** - Priority ordering (v1.1.0+)
+- **[dlq](examples/dlq)** - Dead Letter Queue for failed messages (v1.2.0+)
+- **[compression](examples/compression)** - GZIP payload compression (v1.3.0+)
+- **[deduplication](examples/deduplication)** - Exactly-once semantics (v1.4.0+)
 
 ## CLI Tool
 
 ```bash
 go install github.com/vnykmshr/ledgerq/cmd/ledgerq@latest
+```
 
-ledgerq stats /path/to/queue
-ledgerq inspect /path/to/queue
-ledgerq compact /path/to/queue
-ledgerq peek /path/to/queue 5
+**View queue statistics:**
+```bash
+$ ledgerq stats /path/to/queue
+
+Queue Statistics
+================
+Directory:         /path/to/queue
+Total Messages:    1500
+Pending Messages:  342
+Next Message ID:   1501
+Read Message ID:   1159
+Segment Count:     3
+```
+
+**Inspect queue metadata:**
+```bash
+$ ledgerq inspect /path/to/queue
+```
+
+**Compact queue (remove processed messages):**
+```bash
+$ ledgerq compact /path/to/queue
+```
+
+**Peek at messages (without dequeuing):**
+```bash
+$ ledgerq peek /path/to/queue 5
 ```
 
 ## Documentation

@@ -61,7 +61,7 @@ Processing first 18 messages:
 
 ```go
 opts := ledgerq.DefaultOptions("/path/to/queue")
-opts.EnablePriority = true
+opts.EnablePriorities = true
 q, _ := ledgerq.Open("/path/to/queue", opts)
 ```
 
@@ -245,7 +245,7 @@ fmt.Printf("Pending: %d\n", stats.PendingMessages)
 - Consider increasing consumer throughput
 
 **Priority not working?**
-- Verify `EnablePriority = true` was set at queue creation
+- Verify `EnablePriorities = true` was set at queue creation
 - Check you're using `EnqueueWithPriority()`, not `Enqueue()`
 - Priority only affects dequeue order, not storage order
 
@@ -260,13 +260,13 @@ fmt.Printf("Pending: %d\n", stats.PendingMessages)
 
 ```go
 // ❌ WRONG: Cannot toggle on existing queue
-opts.EnablePriority = true
+opts.EnablePriorities = true
 q.Open("/existing/queue", opts)  // Will fail or ignore setting
 
 // ✅ RIGHT: Create new priority queue and migrate
 oldQ, _ := ledgerq.Open("/old/queue", nil)
 newOpts := ledgerq.DefaultOptions("/new/queue")
-newOpts.EnablePriority = true
+newOpts.EnablePriorities = true
 newQ, _ := ledgerq.Open("/new/queue", newOpts)
 
 // Migrate messages with default Medium priority
