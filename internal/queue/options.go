@@ -147,87 +147,95 @@ func (o *Options) Validate() error {
 		return fmt.Errorf("queue directory path cannot be empty")
 	}
 
-	// Check for path traversal patterns
-	if strings.Contains(dir, "..") {
-		return fmt.Errorf("path traversal not allowed in queue directory: %s", dir)
-	}
-
-	// Convert to absolute path for validation
-	absDir, err := filepath.Abs(dir)
+	cleanDir, err := validatePath(dir, "queue directory")
 	if err != nil {
-		return fmt.Errorf("failed to resolve absolute path for queue directory: %w", err)
-	}
-
-	// Clean the path to remove any unusual patterns
-	cleanDir := filepath.Clean(absDir)
-	if cleanDir != absDir {
-		return fmt.Errorf("queue directory path contains unusual patterns: %s", dir)
+		return err
 	}
 
 	// Validate DLQ path if configured
 	if o.DLQPath != "" {
-		// Check for path traversal patterns
-		if strings.Contains(o.DLQPath, "..") {
-			return fmt.Errorf("path traversal not allowed in DLQ path: %s", o.DLQPath)
-		}
-
-		// Convert to absolute path for validation
-		absDLQPath, err := filepath.Abs(o.DLQPath)
+		cleanDLQPath, err := validatePath(o.DLQPath, "DLQ")
 		if err != nil {
-			return fmt.Errorf("failed to resolve absolute path for DLQ: %w", err)
+			return err
 		}
 
-		// Clean the path
-		cleanDLQPath := filepath.Clean(absDLQPath)
-		if cleanDLQPath != absDLQPath {
-			return fmt.Errorf("DLQ path contains unusual patterns: %s", o.DLQPath)
-		}
-
-		// Ensure DLQ path is not the same as queue path
-		if cleanDLQPath == cleanDir {
-			return fmt.Errorf("DLQ path cannot be the same as queue path")
-		}
-
-		// Ensure DLQ is not a subdirectory of queue path or vice versa
-		if strings.HasPrefix(cleanDLQPath+string(filepath.Separator), cleanDir+string(filepath.Separator)) {
-			return fmt.Errorf("DLQ path cannot be a subdirectory of queue path")
-		}
-		if strings.HasPrefix(cleanDir+string(filepath.Separator), cleanDLQPath+string(filepath.Separator)) {
-			return fmt.Errorf("queue path cannot be a subdirectory of DLQ path")
+		if err := validateDLQPaths(cleanDir, cleanDLQPath); err != nil {
+			return err
 		}
 	}
 
-	// Validate message size limit
-	if o.MaxMessageSize < 0 {
-		return fmt.Errorf("max message size cannot be negative")
-	}
-
-	// Validate disk space limit
-	if o.MinFreeDiskSpace < 0 {
-		return fmt.Errorf("min free disk space cannot be negative")
-	}
-
-	// Validate DLQ size limit
-	if o.DLQMaxSize < 0 {
-		return fmt.Errorf("DLQ max size cannot be negative")
+	// Validate numeric limits
+	if err := validateNumericLimits(o); err != nil {
+		return err
 	}
 
 	// Validate compression settings
+	return validateCompressionSettings(o)
+}
+
+// validatePath validates a path for security issues
+func validatePath(path, pathType string) (string, error) {
+	if strings.Contains(path, "..") {
+		return "", fmt.Errorf("path traversal not allowed in %s: %s", pathType, path)
+	}
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve absolute path for %s: %w", pathType, err)
+	}
+
+	cleanPath := filepath.Clean(absPath)
+	if cleanPath != absPath {
+		return "", fmt.Errorf("%s path contains unusual patterns: %s", pathType, path)
+	}
+
+	return cleanPath, nil
+}
+
+// validateDLQPaths ensures DLQ and queue paths don't conflict
+func validateDLQPaths(cleanDir, cleanDLQPath string) error {
+	if cleanDLQPath == cleanDir {
+		return fmt.Errorf("DLQ path cannot be the same as queue path")
+	}
+
+	if strings.HasPrefix(cleanDLQPath+string(filepath.Separator), cleanDir+string(filepath.Separator)) {
+		return fmt.Errorf("DLQ path cannot be a subdirectory of queue path")
+	}
+	if strings.HasPrefix(cleanDir+string(filepath.Separator), cleanDLQPath+string(filepath.Separator)) {
+		return fmt.Errorf("queue path cannot be a subdirectory of DLQ path")
+	}
+
+	return nil
+}
+
+// validateNumericLimits validates numeric configuration options
+func validateNumericLimits(o *Options) error {
+	if o.MaxMessageSize < 0 {
+		return fmt.Errorf("max message size cannot be negative")
+	}
+	if o.MinFreeDiskSpace < 0 {
+		return fmt.Errorf("min free disk space cannot be negative")
+	}
+	if o.DLQMaxSize < 0 {
+		return fmt.Errorf("DLQ max size cannot be negative")
+	}
+	if o.MinCompressionSize < 0 {
+		return fmt.Errorf("min compression size cannot be negative")
+	}
+	return nil
+}
+
+// validateCompressionSettings validates compression configuration
+func validateCompressionSettings(o *Options) error {
 	if o.DefaultCompression != format.CompressionNone && o.DefaultCompression != format.CompressionGzip {
 		return fmt.Errorf("invalid default compression type: %d", o.DefaultCompression)
 	}
 
-	// Validate compression level for GZIP
 	if o.CompressionLevel != 0 {
 		if o.CompressionLevel < gzip.HuffmanOnly || o.CompressionLevel > gzip.BestCompression {
 			return fmt.Errorf("invalid compression level: %d (valid range for gzip: %d-%d)",
 				o.CompressionLevel, gzip.HuffmanOnly, gzip.BestCompression)
 		}
-	}
-
-	// Validate minimum compression size
-	if o.MinCompressionSize < 0 {
-		return fmt.Errorf("min compression size cannot be negative")
 	}
 
 	return nil

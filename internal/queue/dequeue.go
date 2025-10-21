@@ -8,6 +8,7 @@ import (
 
 	"github.com/vnykmshr/ledgerq/internal/format"
 	"github.com/vnykmshr/ledgerq/internal/logging"
+	"github.com/vnykmshr/ledgerq/internal/segment"
 )
 
 // Message represents a dequeued message.
@@ -178,187 +179,164 @@ func (q *Queue) dequeueFIFO(now int64, start time.Time) (*Message, error) {
 
 // dequeuePriority implements priority-aware dequeue logic
 func (q *Queue) dequeuePriority(now int64, start time.Time) (*Message, error) {
-	maxAttempts := 1000
-	attempts := 0
+	allSegments := q.getAllSegments()
 
-	// Get all segments
-	allSegments := q.segments.GetSegments()
-	activeSeg := q.segments.GetActiveSegment()
-	if activeSeg != nil {
-		allSegments = append(allSegments, activeSeg)
-	}
-
-	for attempts < maxAttempts {
-		attempts++
-
-		// Check for priority index entries
+	for attempts := 0; attempts < 1000; attempts++ {
 		if q.priorityIndex.Count() == 0 {
 			q.opts.MetricsCollector.RecordDequeueError()
 			return nil, fmt.Errorf("no messages available")
 		}
 
-		// Try priorities in order: High → Medium → Low
-		// With starvation prevention for low priority
-		var targetOffset uint64
-		var targetPriority uint8
-		found := false
-
-		// Check for starvation: if low-priority messages have waited too long, promote them
-		// This prevents low-priority messages from being starved by a constant stream of high-priority ones
-		if q.opts.PriorityStarvationWindow > 0 {
-			lowEntry := q.priorityIndex.OldestInPriority(format.PriorityLow)
-			if lowEntry != nil {
-				age := time.Duration(now - lowEntry.Timestamp)
-				if age >= q.opts.PriorityStarvationWindow {
-					// Low-priority message has starved, temporarily promote it to prevent indefinite waiting
-					targetOffset = lowEntry.Offset
-					targetPriority = format.PriorityLow
-					found = true
-					q.opts.Logger.Debug("promoting starved low-priority message",
-						logging.F("offset", targetOffset),
-						logging.F("age", age.String()),
-					)
-				}
-			}
-		}
-
-		// If no starvation, check priorities in order
-		if !found {
-			// Try High priority first
-			highEntry := q.priorityIndex.OldestInPriority(format.PriorityHigh)
-			if highEntry != nil {
-				targetOffset = highEntry.Offset
-				targetPriority = format.PriorityHigh
-				found = true
-			} else {
-				// Try Medium priority
-				mediumEntry := q.priorityIndex.OldestInPriority(format.PriorityMedium)
-				if mediumEntry != nil {
-					targetOffset = mediumEntry.Offset
-					targetPriority = format.PriorityMedium
-					found = true
-				} else {
-					// Try Low priority
-					lowEntry := q.priorityIndex.OldestInPriority(format.PriorityLow)
-					if lowEntry != nil {
-						targetOffset = lowEntry.Offset
-						targetPriority = format.PriorityLow
-						found = true
-					}
-				}
-			}
-		}
+		targetOffset, targetPriority := q.selectNextPriorityMessage(now)
+		entry, fileOffset, found := q.findEntryAtOffset(allSegments, targetOffset)
 
 		if !found {
-			q.opts.MetricsCollector.RecordDequeueError()
-			return nil, fmt.Errorf("no messages available")
-		}
-
-		// Find and read the entry from segments
-		var entry *format.Entry
-		var fileOffset uint64
-		entryFound := false
-
-		for _, seg := range allSegments {
-			reader, err := q.segments.OpenReader(seg.BaseOffset)
-			if err != nil {
-				continue
-			}
-
-			// Search for entry at target offset
-			_ = reader.ScanAll(func(e *format.Entry, off uint64) error {
-				if off == targetOffset {
-					entry = e
-					fileOffset = off
-					entryFound = true
-					return fmt.Errorf("found") // Stop scanning
-				}
-				return nil
-			})
-
-			_ = reader.Close()
-
-			if entryFound {
-				break
-			}
-		}
-
-		if !entryFound {
-			// Message not found, remove from index and continue
 			q.priorityIndex.Remove(targetOffset)
 			q.opts.Logger.Debug("removed missing message from priority index",
-				logging.F("offset", targetOffset),
-			)
+				logging.F("offset", targetOffset))
 			continue
 		}
 
-		// Check if message has expired
 		if entry.IsExpired(now) {
-			// Remove expired message from index
 			q.priorityIndex.Remove(targetOffset)
 			q.opts.Logger.Debug("skipping expired priority message",
 				logging.F("msg_id", entry.MsgID),
-				logging.F("priority", targetPriority),
-				logging.F("expires_at", entry.ExpiresAt),
-			)
+				logging.F("priority", targetPriority))
 			continue
 		}
 
-		// Decompress payload if compressed
-		payload := entry.Payload
-		if entry.Compression != format.CompressionNone {
-			decompressed, err := format.DecompressPayload(entry.Payload, entry.Compression)
-			if err != nil {
-				q.opts.MetricsCollector.RecordDequeueError()
-				q.opts.Logger.Error("failed to decompress message",
-					logging.F("msg_id", entry.MsgID),
-					logging.F("compression_type", entry.Compression.String()),
-					logging.F("error", err.Error()),
-				)
-				return nil, fmt.Errorf("failed to decompress message %d: %w", entry.MsgID, err)
-			}
-			payload = decompressed
+		msg, err := q.finalizePriorityDequeue(entry, fileOffset, targetPriority, start)
+		if err != nil {
+			return nil, err
 		}
-
-		// Found valid message!
-		msg := &Message{
-			ID:        entry.MsgID,
-			Offset:    fileOffset,
-			Payload:   payload,
-			Timestamp: entry.Timestamp,
-			ExpiresAt: entry.ExpiresAt,
-			Priority:  entry.Priority,
-			Headers:   entry.Headers,
-		}
-
-		// Remove from priority index
-		q.priorityIndex.Remove(targetOffset)
-
-		// Update read position to this message ID if it's newer than current read position
-		// In priority mode, messages may be consumed out of order, so we only advance
-		// the read position if this message ID is at or beyond the current read position
-		if entry.MsgID >= q.readMsgID {
-			q.readMsgID = entry.MsgID + 1
-			if err := q.metadata.SetReadMsgID(q.readMsgID); err != nil {
-				return msg, fmt.Errorf("failed to update metadata: %w", err)
-			}
-		}
-
-		// Record metrics
-		q.opts.MetricsCollector.RecordDequeue(len(msg.Payload), time.Since(start))
-
-		q.opts.Logger.Debug("dequeued priority message",
-			logging.F("msg_id", entry.MsgID),
-			logging.F("priority", targetPriority),
-			logging.F("offset", fileOffset),
-		)
 
 		return msg, nil
 	}
 
-	// Exceeded max attempts
 	q.opts.MetricsCollector.RecordDequeueError()
 	return nil, fmt.Errorf("exceeded maximum attempts while skipping expired messages")
+}
+
+// getAllSegments returns all segments including the active one
+func (q *Queue) getAllSegments() []*segment.SegmentInfo {
+	allSegments := q.segments.GetSegments()
+	if activeSeg := q.segments.GetActiveSegment(); activeSeg != nil {
+		allSegments = append(allSegments, activeSeg)
+	}
+	return allSegments
+}
+
+// selectNextPriorityMessage selects the next message to dequeue based on priority and starvation prevention
+func (q *Queue) selectNextPriorityMessage(now int64) (targetOffset uint64, targetPriority uint8) {
+	// Check for starvation prevention
+	if q.opts.PriorityStarvationWindow > 0 {
+		if offset, priority, found := q.checkStarvation(now); found {
+			return offset, priority
+		}
+	}
+
+	// Try priorities in order: High → Medium → Low
+	for _, priority := range []uint8{format.PriorityHigh, format.PriorityMedium, format.PriorityLow} {
+		if entry := q.priorityIndex.OldestInPriority(priority); entry != nil {
+			return entry.Offset, priority
+		}
+	}
+
+	return 0, 0
+}
+
+// checkStarvation checks if low-priority messages should be promoted due to starvation
+func (q *Queue) checkStarvation(now int64) (uint64, uint8, bool) {
+	lowEntry := q.priorityIndex.OldestInPriority(format.PriorityLow)
+	if lowEntry == nil {
+		return 0, 0, false
+	}
+
+	age := time.Duration(now - lowEntry.Timestamp)
+	if age >= q.opts.PriorityStarvationWindow {
+		q.opts.Logger.Debug("promoting starved low-priority message",
+			logging.F("offset", lowEntry.Offset),
+			logging.F("age", age.String()))
+		return lowEntry.Offset, format.PriorityLow, true
+	}
+
+	return 0, 0, false
+}
+
+// findEntryAtOffset searches for an entry at the specified offset across all segments
+func (q *Queue) findEntryAtOffset(segments []*segment.SegmentInfo, targetOffset uint64) (*format.Entry, uint64, bool) {
+	for _, seg := range segments {
+		reader, err := q.segments.OpenReader(seg.BaseOffset)
+		if err != nil {
+			continue
+		}
+
+		var entry *format.Entry
+		var fileOffset uint64
+		found := false
+
+		_ = reader.ScanAll(func(e *format.Entry, off uint64) error {
+			if off == targetOffset {
+				entry = e
+				fileOffset = off
+				found = true
+				return fmt.Errorf("found")
+			}
+			return nil
+		})
+
+		_ = reader.Close()
+
+		if found {
+			return entry, fileOffset, true
+		}
+	}
+
+	return nil, 0, false
+}
+
+// finalizePriorityDequeue completes the dequeue operation for a priority message
+func (q *Queue) finalizePriorityDequeue(entry *format.Entry, fileOffset uint64, targetPriority uint8, start time.Time) (*Message, error) {
+	payload := entry.Payload
+	if entry.Compression != format.CompressionNone {
+		decompressed, err := format.DecompressPayload(entry.Payload, entry.Compression)
+		if err != nil {
+			q.opts.MetricsCollector.RecordDequeueError()
+			q.opts.Logger.Error("failed to decompress message",
+				logging.F("msg_id", entry.MsgID),
+				logging.F("compression_type", entry.Compression.String()),
+				logging.F("error", err.Error()))
+			return nil, fmt.Errorf("failed to decompress message %d: %w", entry.MsgID, err)
+		}
+		payload = decompressed
+	}
+
+	msg := &Message{
+		ID:        entry.MsgID,
+		Offset:    fileOffset,
+		Payload:   payload,
+		Timestamp: entry.Timestamp,
+		ExpiresAt: entry.ExpiresAt,
+		Priority:  entry.Priority,
+		Headers:   entry.Headers,
+	}
+
+	q.priorityIndex.Remove(fileOffset)
+
+	if entry.MsgID >= q.readMsgID {
+		q.readMsgID = entry.MsgID + 1
+		if err := q.metadata.SetReadMsgID(q.readMsgID); err != nil {
+			return msg, fmt.Errorf("failed to update metadata: %w", err)
+		}
+	}
+
+	q.opts.MetricsCollector.RecordDequeue(len(msg.Payload), time.Since(start))
+	q.opts.Logger.Debug("dequeued priority message",
+		logging.F("msg_id", entry.MsgID),
+		logging.F("priority", targetPriority),
+		logging.F("offset", fileOffset))
+
+	return msg, nil
 }
 
 // DequeueBatch retrieves up to maxMessages from the queue in a single operation.
