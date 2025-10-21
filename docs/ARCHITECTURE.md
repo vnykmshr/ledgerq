@@ -1,8 +1,9 @@
 # LedgerQ Architecture
 
-**Last Updated:** 2025-10-20
-**Version:** 1.2.0
-**Review Cadence:** Quarterly
+**Last Updated:** 2025-10-21
+**Version:** 1.4.0
+**Maintainer:** @vnykmshr
+**Review Cadence:** Quarterly or after major feature releases
 
 Internal architecture and design decisions for LedgerQ message queue.
 
@@ -36,13 +37,18 @@ Each entry consists of:
 **Field Details**:
 - **Length**: Total entry size (excluding length field itself)
 - **Type**: Entry type (Data=1, Tombstone=2, Checkpoint=3)
-- **Flags**: Feature flags (TTL, Headers, Compression, etc.)
+- **Flags**: Feature flags (1 byte bitmask)
+  - Bit 0: Has TTL (ExpiresAt field present)
+  - Bit 1: Has Headers
+  - Bit 2: Payload is compressed (v1.3.0+)
+  - Bit 3: Has Priority (v1.1.0+)
+  - Bits 4-7: Reserved for future use
 - **Message ID**: Unique monotonic message identifier
 - **Timestamp**: Unix nanoseconds when enqueued
-- **ExpiresAt**: Unix nanoseconds when message expires (only if TTL flag set)
-- **Headers**: Key-value pairs (only if Headers flag set)
+- **ExpiresAt**: Unix nanoseconds when message expires (only if bit 0 set)
+- **Headers**: Key-value pairs (only if bit 1 set)
   - Format: `NumHeaders (2B) + [KeyLen (2B) + Key + ValueLen (2B) + Value]...`
-- **Payload**: Message data (variable length)
+- **Payload**: Message data (compressed if bit 2 set, otherwise raw)
 - **CRC32**: Checksum for corruption detection
 
 ### Index Format
@@ -298,6 +304,86 @@ Main Queue
 - No nested DLQ (DLQPath="" for DLQ itself)
 - Atomic state persistence (temp file + rename)
 - Metadata headers: `dlq.original_msg_id`, `dlq.retry_count`, `dlq.failure_reason`, `dlq.last_failure`
+
+### 8. Payload Compression (Optional) - v1.3.0+
+
+**When Enabled** (`DefaultCompression` set):
+
+```
+Format Layer (internal/format/)
+  ├── Compression Check (>= MinCompressionSize?)
+  ├── GZIP Compress (level 1-9)
+  ├── Efficiency Check (savings >= 5%?)
+  └── Store: compressed or original (whichever is smaller)
+```
+
+**Compression Flow**:
+1. Check payload size >= `MinCompressionSize` (default 1KB)
+2. Compress with GZIP at configured level
+3. Compare sizes: use compressed only if >= 5% savings
+4. Set compression flag in entry header
+5. Decompression automatic on read (transparent)
+
+**Entry Format Addition**:
+- Flags bit 2: Compression enabled
+- Payload stored as compressed bytes
+- No separate compression header (flag is sufficient)
+
+**Performance**:
+- Compression: ~500 KB/s (level 6)
+- Decompression: ~15 MB/s
+- Adds ~2-3ms latency for 10KB payload
+
+**Security**:
+- Decompression bomb protection: 100MB limit
+- Uses stdlib `compress/gzip` only
+
+### 9. Message Deduplication (Optional) - v1.4.0+
+
+**When Enabled** (`DefaultDeduplicationWindow` > 0):
+
+```
+Queue Layer (internal/queue/)
+  ├── DedupTracker
+  │   ├── Hash Map: dedupID → {offset, expiresAt}
+  │   ├── Background Cleanup (every 10s)
+  │   └── State Persistence (.dedup_state.json)
+  └── EnqueueWithDedup()
+      ├── 1. Hash dedupID (SHA-256)
+      ├── 2. Check if exists + not expired
+      ├── 3. Return (offset, true) if duplicate
+      └── 4. Track new entry if unique
+```
+
+**Deduplication Flow**:
+1. `EnqueueWithDedup(payload, dedupID, window)`
+2. SHA-256 hash of dedupID (not payload)
+3. Check hash map for existing entry
+4. If found and not expired → return original offset, isDuplicate=true
+5. If unique → enqueue normally + track in map
+6. Background goroutine cleans expired entries every 10s
+
+**Memory Structure**:
+```go
+type dedupEntry struct {
+    Offset    uint64  // 8 bytes
+    ExpiresAt int64   // 8 bytes
+}
+// Map key: SHA-256 hash (32 bytes)
+// Total: ~64 bytes per entry
+// 100K entries ≈ 6.4 MB
+```
+
+**Persistence**:
+- Atomic writes: temp file + rename pattern
+- JSON format for human readability
+- Save on Close() and periodically
+- Skip expired entries during save/load
+
+**Bounded Memory**:
+- `MaxDeduplicationEntries` limit (default 100K)
+- LRU eviction when full (oldest expiration first)
+- Error logged but enqueue still succeeds
 
 ## Concurrency Model
 
