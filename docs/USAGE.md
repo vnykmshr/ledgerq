@@ -1,7 +1,7 @@
 # LedgerQ Usage Guide
 
 **Last Updated:** 2025-10-21
-**Version:** 1.4.0
+**Version:** 1.4.1
 **Maintainer:** @vnykmshr
 **Review Cadence:** After each minor version release
 
