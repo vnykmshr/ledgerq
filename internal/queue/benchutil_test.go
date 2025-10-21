@@ -1,7 +1,6 @@
 package queue
 
 import (
-	"fmt"
 	"testing"
 )
 
@@ -55,20 +54,6 @@ func populateQueue(b *testing.B, q *Queue, n int) {
 	_ = q.Sync()
 }
 
-// populateQueueWithPriority pre-populates a queue with n messages with cycling priorities.
-func populateQueueWithPriority(b *testing.B, q *Queue, n int) {
-	b.Helper()
-
-	payload := benchPayload()
-	for i := 0; i < n; i++ {
-		priority := uint8(i % 3) // Cycle through priorities
-		if _, err := q.EnqueueWithPriority(payload, priority); err != nil {
-			b.Fatalf("failed to populate queue with priority: %v", err)
-		}
-	}
-	_ = q.Sync()
-}
-
 // populateQueueBatch pre-populates a queue using batch operations.
 func populateQueueBatch(b *testing.B, q *Queue, totalMessages int, batchSize int) {
 	b.Helper()
@@ -89,35 +74,4 @@ func populateQueueBatch(b *testing.B, q *Queue, totalMessages int, batchSize int
 		}
 	}
 	_ = q.Sync()
-}
-
-// benchBatchWithOptions creates a batch with all options for benchmarking.
-func benchBatchWithOptions(batchSize int) []BatchEnqueueOptions {
-	messages := make([]BatchEnqueueOptions, batchSize)
-	for i := 0; i < batchSize; i++ {
-		messages[i] = BatchEnqueueOptions{
-			Payload:  benchPayload(),
-			Priority: uint8(i % 3), // Mix of priorities
-			TTL:      0,
-			Headers:  nil,
-		}
-	}
-	return messages
-}
-
-// benchBatchWithAllFeatures creates a batch with priority, TTL, and headers.
-func benchBatchWithAllFeatures(batchSize int) []BatchEnqueueOptions {
-	messages := make([]BatchEnqueueOptions, batchSize)
-	for i := 0; i < batchSize; i++ {
-		messages[i] = BatchEnqueueOptions{
-			Payload:  benchPayload(),
-			Priority: uint8(i % 3),
-			TTL:      0, // Use 0 for benchmarks (no expiration overhead)
-			Headers: map[string]string{
-				"source": fmt.Sprintf("producer-%d", i%5),
-				"type":   "benchmark",
-			},
-		}
-	}
-	return messages
 }

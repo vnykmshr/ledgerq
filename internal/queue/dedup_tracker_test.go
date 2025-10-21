@@ -35,7 +35,7 @@ func TestDedupTracker_CheckAndTrack(t *testing.T) {
 	}
 
 	// Different dedup ID should not be duplicate
-	offset, isDup = tracker.Check("order-456", 5*time.Minute)
+	_, isDup = tracker.Check("order-456", 5*time.Minute)
 	if isDup {
 		t.Error("Different dedup ID should not be duplicate")
 	}
