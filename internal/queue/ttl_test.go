@@ -41,8 +41,8 @@ func TestEnqueueWithTTL(t *testing.T) {
 func TestTTL_MessageExpiration(t *testing.T) {
 	q := setupQueue(t, nil)
 
-	// Enqueue message with very short TTL (100ms)
-	_, err := q.EnqueueWithTTL([]byte("expires soon"), 100*time.Millisecond)
+	// Enqueue message with very short TTL (2ms)
+	_, err := q.EnqueueWithTTL([]byte("expires soon"), 2*time.Millisecond)
 	assertNoError(t, err)
 
 	// Enqueue normal message
@@ -50,7 +50,7 @@ func TestTTL_MessageExpiration(t *testing.T) {
 	assertNoError(t, err)
 
 	// Wait for first message to expire
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 
 	// Dequeue should skip expired message and return second message
 	msg, err := q.Dequeue()
@@ -73,7 +73,7 @@ func TestTTL_MultipleExpiredMessages(t *testing.T) {
 
 	// Enqueue 3 messages with short TTL
 	for i := 0; i < 3; i++ {
-		_, err := q.EnqueueWithTTL([]byte("expires"), 50*time.Millisecond)
+		_, err := q.EnqueueWithTTL([]byte("expires"), 1*time.Millisecond)
 		if err != nil {
 			t.Fatalf("EnqueueWithTTL() error = %v", err)
 		}
@@ -84,7 +84,7 @@ func TestTTL_MultipleExpiredMessages(t *testing.T) {
 	assertNoError(t, err)
 
 	// Wait for TTL messages to expire
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 
 	// Dequeue should skip all 3 expired and return the valid one
 	msg, err := q.Dequeue()
@@ -106,23 +106,23 @@ func TestTTL_BatchDequeue(t *testing.T) {
 	q := setupQueue(t, nil)
 
 	// Enqueue: expired, valid, expired, valid, expired
-	_, err := q.EnqueueWithTTL([]byte("expired1"), 50*time.Millisecond)
+	_, err := q.EnqueueWithTTL([]byte("expired1"), 1*time.Millisecond)
 	assertNoError(t, err)
 
 	_, err = q.Enqueue([]byte("valid1"))
 	assertNoError(t, err)
 
-	_, err = q.EnqueueWithTTL([]byte("expired2"), 50*time.Millisecond)
+	_, err = q.EnqueueWithTTL([]byte("expired2"), 1*time.Millisecond)
 	assertNoError(t, err)
 
 	_, err = q.Enqueue([]byte("valid2"))
 	assertNoError(t, err)
 
-	_, err = q.EnqueueWithTTL([]byte("expired3"), 50*time.Millisecond)
+	_, err = q.EnqueueWithTTL([]byte("expired3"), 1*time.Millisecond)
 	assertNoError(t, err)
 
 	// Wait for TTL messages to expire
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 
 	// Batch dequeue should skip expired and return only valid ones
 	messages, err := q.DequeueBatch(10)
@@ -278,14 +278,14 @@ func TestTTL_AllExpired(t *testing.T) {
 
 	// Enqueue only expired messages
 	for i := 0; i < 5; i++ {
-		_, err := q.EnqueueWithTTL([]byte("expired"), 50*time.Millisecond)
+		_, err := q.EnqueueWithTTL([]byte("expired"), 1*time.Millisecond)
 		if err != nil {
 			t.Fatalf("EnqueueWithTTL() error = %v", err)
 		}
 	}
 
 	// Wait for all to expire
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 
 	// Dequeue should fail with "no messages available"
 	_, err := q.Dequeue()

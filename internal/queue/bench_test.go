@@ -7,18 +7,8 @@ import (
 )
 
 func BenchmarkEnqueue(b *testing.B) {
-	tmpDir := b.TempDir()
-
-	opts := DefaultOptions(tmpDir)
-	opts.AutoSync = false // Disable auto-sync for fair comparison
-
-	q, err := Open(tmpDir, opts)
-	if err != nil {
-		b.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
-
-	payload := []byte("benchmark message payload")
+	q := setupBenchQueue(b, nil)
+	payload := benchPayload()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -26,10 +16,6 @@ func BenchmarkEnqueue(b *testing.B) {
 			b.Fatalf("Enqueue() error = %v", err)
 		}
 	}
-	b.StopTimer()
-
-	// Sync at the end
-	_ = q.Sync()
 }
 
 func BenchmarkEnqueueBatch_10(b *testing.B) {
@@ -45,22 +31,8 @@ func BenchmarkEnqueueBatch_1000(b *testing.B) {
 }
 
 func benchmarkEnqueueBatch(b *testing.B, batchSize int) {
-	tmpDir := b.TempDir()
-
-	opts := DefaultOptions(tmpDir)
-	opts.AutoSync = false
-
-	q, err := Open(tmpDir, opts)
-	if err != nil {
-		b.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
-
-	// Prepare batch
-	payloads := make([][]byte, batchSize)
-	for i := 0; i < batchSize; i++ {
-		payloads[i] = []byte("benchmark message payload")
-	}
+	q := setupBenchQueue(b, nil)
+	payloads := benchPayloads(batchSize)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -68,25 +40,12 @@ func benchmarkEnqueueBatch(b *testing.B, batchSize int) {
 			b.Fatalf("EnqueueBatch() error = %v", err)
 		}
 	}
-	b.StopTimer()
-
-	// Sync at the end
-	_ = q.Sync()
 }
 
 func BenchmarkEnqueueWithSync(b *testing.B) {
-	tmpDir := b.TempDir()
-
-	opts := DefaultOptions(tmpDir)
-	opts.AutoSync = true // Enable auto-sync
-
-	q, err := Open(tmpDir, opts)
-	if err != nil {
-		b.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
-
-	payload := []byte("benchmark message payload")
+	opts := &Options{AutoSync: true}
+	q := setupBenchQueue(b, opts)
+	payload := benchPayload()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -105,22 +64,9 @@ func BenchmarkEnqueueBatchWithSync_100(b *testing.B) {
 }
 
 func benchmarkEnqueueBatchWithSync(b *testing.B, batchSize int) {
-	tmpDir := b.TempDir()
-
-	opts := DefaultOptions(tmpDir)
-	opts.AutoSync = true
-
-	q, err := Open(tmpDir, opts)
-	if err != nil {
-		b.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
-
-	// Prepare batch
-	payloads := make([][]byte, batchSize)
-	for i := 0; i < batchSize; i++ {
-		payloads[i] = []byte("benchmark message payload")
-	}
+	opts := &Options{AutoSync: true}
+	q := setupBenchQueue(b, opts)
+	payloads := benchPayloads(batchSize)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -131,22 +77,8 @@ func benchmarkEnqueueBatchWithSync(b *testing.B, batchSize int) {
 }
 
 func BenchmarkDequeue(b *testing.B) {
-	tmpDir := b.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		b.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
-
-	// Pre-populate queue
-	payload := []byte("benchmark message payload")
-	for i := 0; i < b.N; i++ {
-		if _, err := q.Enqueue(payload); err != nil {
-			b.Fatalf("Enqueue() error = %v", err)
-		}
-	}
-	_ = q.Sync()
+	q := setupBenchQueue(b, nil)
+	populateQueue(b, q, b.N)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -169,36 +101,9 @@ func BenchmarkDequeueBatch_1000(b *testing.B) {
 }
 
 func benchmarkDequeueBatch(b *testing.B, batchSize int) {
-	tmpDir := b.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		b.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
-
-	// Pre-populate queue with N batches
-	payload := []byte("benchmark message payload")
+	q := setupBenchQueue(b, nil)
 	totalMessages := b.N * batchSize
-
-	// Enqueue in batches for faster setup
-	setupBatchSize := 1000
-	for i := 0; i < totalMessages; i += setupBatchSize {
-		remaining := totalMessages - i
-		if remaining > setupBatchSize {
-			remaining = setupBatchSize
-		}
-
-		batch := make([][]byte, remaining)
-		for j := 0; j < remaining; j++ {
-			batch[j] = payload
-		}
-
-		if _, err := q.EnqueueBatch(batch); err != nil {
-			b.Fatalf("EnqueueBatch() error = %v", err)
-		}
-	}
-	_ = q.Sync()
+	populateQueueBatch(b, q, totalMessages, 1000)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -209,18 +114,8 @@ func benchmarkDequeueBatch(b *testing.B, batchSize int) {
 }
 
 func BenchmarkRoundtrip(b *testing.B) {
-	tmpDir := b.TempDir()
-
-	opts := DefaultOptions(tmpDir)
-	opts.AutoSync = false
-
-	q, err := Open(tmpDir, opts)
-	if err != nil {
-		b.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
-
-	payload := []byte("benchmark message payload")
+	q := setupBenchQueue(b, nil)
+	payload := benchPayload()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -242,22 +137,8 @@ func BenchmarkRoundtripBatch_100(b *testing.B) {
 }
 
 func benchmarkRoundtripBatch(b *testing.B, batchSize int) {
-	tmpDir := b.TempDir()
-
-	opts := DefaultOptions(tmpDir)
-	opts.AutoSync = false
-
-	q, err := Open(tmpDir, opts)
-	if err != nil {
-		b.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
-
-	// Prepare batch
-	payloads := make([][]byte, batchSize)
-	for i := 0; i < batchSize; i++ {
-		payloads[i] = []byte("benchmark message payload")
-	}
+	q := setupBenchQueue(b, nil)
+	payloads := benchPayloads(batchSize)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -272,20 +153,8 @@ func benchmarkRoundtripBatch(b *testing.B, batchSize int) {
 
 // Benchmark Stats operation
 func BenchmarkStats(b *testing.B) {
-	tmpDir := b.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		b.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
-
-	// Add some messages
-	for i := 0; i < 100; i++ {
-		if _, err := q.Enqueue([]byte(fmt.Sprintf("msg%d", i))); err != nil {
-			b.Fatalf("Enqueue() error = %v", err)
-		}
-	}
+	q := setupBenchQueue(b, nil)
+	populateQueue(b, q, 100)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -295,21 +164,8 @@ func BenchmarkStats(b *testing.B) {
 
 // Benchmark replay operations
 func BenchmarkSeekToMessageID(b *testing.B) {
-	tmpDir := b.TempDir()
-
-	q, err := Open(tmpDir, nil)
-	if err != nil {
-		b.Fatalf("Open() error = %v", err)
-	}
-	defer func() { _ = q.Close() }()
-
-	// Enqueue 1000 messages
-	for i := 0; i < 1000; i++ {
-		if _, err := q.Enqueue([]byte("benchmark message")); err != nil {
-			b.Fatalf("Enqueue() error = %v", err)
-		}
-	}
-	_ = q.Sync()
+	q := setupBenchQueue(b, nil)
+	populateQueue(b, q, 1000)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

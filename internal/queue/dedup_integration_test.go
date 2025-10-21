@@ -128,7 +128,7 @@ func TestDeduplication_Expiration(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	opts := DefaultOptions(tmpDir)
-	opts.DefaultDeduplicationWindow = 100 * time.Millisecond
+	opts.DefaultDeduplicationWindow = 5 * time.Millisecond
 	opts.MaxDeduplicationEntries = 1000
 
 	q, err := Open(tmpDir, opts)
@@ -140,7 +140,7 @@ func TestDeduplication_Expiration(t *testing.T) {
 	payload := []byte("test message")
 
 	// Enqueue with short window
-	offset1, isDup1, err := q.EnqueueWithDedup(payload, "order-123", 100*time.Millisecond)
+	offset1, isDup1, err := q.EnqueueWithDedup(payload, "order-123", 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("First enqueue failed: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestDeduplication_Expiration(t *testing.T) {
 	}
 
 	// Should be duplicate immediately
-	_, isDup2, err := q.EnqueueWithDedup(payload, "order-123", 100*time.Millisecond)
+	_, isDup2, err := q.EnqueueWithDedup(payload, "order-123", 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("Second enqueue failed: %v", err)
 	}
@@ -158,10 +158,10 @@ func TestDeduplication_Expiration(t *testing.T) {
 	}
 
 	// Wait for expiration
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	// Should no longer be duplicate
-	offset3, isDup3, err := q.EnqueueWithDedup(payload, "order-123", 100*time.Millisecond)
+	offset3, isDup3, err := q.EnqueueWithDedup(payload, "order-123", 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("Third enqueue failed: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestDeduplication_Cleanup(t *testing.T) {
 	// Enqueue multiple messages with short windows
 	for i := 0; i < 10; i++ {
 		dedupID := string(rune('a' + i))
-		_, _, err := q.EnqueueWithDedup(payload, dedupID, 50*time.Millisecond)
+		_, _, err := q.EnqueueWithDedup(payload, dedupID, 10*time.Millisecond)
 		if err != nil {
 			t.Fatalf("Enqueue %d failed: %v", i, err)
 		}
@@ -206,7 +206,7 @@ func TestDeduplication_Cleanup(t *testing.T) {
 
 	// Wait for expiration + cleanup cycle (cleanup runs every 10 seconds)
 	// We'll manually trigger cleanup by waiting for expiration
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	// Force cleanup by checking the count (which internally scans for expired)
 	if q.dedupTracker != nil {
@@ -325,7 +325,7 @@ func TestDeduplication_CustomWindow(t *testing.T) {
 	payload := []byte("test message")
 
 	// Enqueue with custom short window (overrides default)
-	_, isDup1, err := q.EnqueueWithDedup(payload, "order-123", 100*time.Millisecond)
+	_, isDup1, err := q.EnqueueWithDedup(payload, "order-123", 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("First enqueue failed: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestDeduplication_CustomWindow(t *testing.T) {
 	}
 
 	// Should be duplicate immediately
-	_, isDup2, err := q.EnqueueWithDedup(payload, "order-123", 100*time.Millisecond)
+	_, isDup2, err := q.EnqueueWithDedup(payload, "order-123", 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("Second enqueue failed: %v", err)
 	}
@@ -343,10 +343,10 @@ func TestDeduplication_CustomWindow(t *testing.T) {
 	}
 
 	// Wait for custom window to expire
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	// Should no longer be duplicate
-	_, isDup3, err := q.EnqueueWithDedup(payload, "order-123", 100*time.Millisecond)
+	_, isDup3, err := q.EnqueueWithDedup(payload, "order-123", 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("Third enqueue failed: %v", err)
 	}

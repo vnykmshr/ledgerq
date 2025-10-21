@@ -61,22 +61,22 @@ func TestDedupTracker_Expiration(t *testing.T) {
 	tracker := NewDedupTracker("", 1000)
 
 	// Track with very short window
-	err := tracker.Track("order-123", 42, 42, 50*time.Millisecond)
+	err := tracker.Track("order-123", 42, 42, 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("Failed to track: %v", err)
 	}
 
 	// Should be duplicate immediately
-	_, isDup := tracker.Check("order-123", 50*time.Millisecond)
+	_, isDup := tracker.Check("order-123", 10*time.Millisecond)
 	if !isDup {
 		t.Error("Expected duplicate before expiration")
 	}
 
 	// Wait for expiration
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	// Should no longer be duplicate
-	_, isDup = tracker.Check("order-123", 50*time.Millisecond)
+	_, isDup = tracker.Check("order-123", 10*time.Millisecond)
 	if isDup {
 		t.Error("Expected no duplicate after expiration")
 	}
@@ -86,16 +86,16 @@ func TestDedupTracker_CleanExpired(t *testing.T) {
 	tracker := NewDedupTracker("", 1000)
 
 	// Track multiple entries with different windows
-	tracker.Track("order-1", 1, 1, 50*time.Millisecond)
+	tracker.Track("order-1", 1, 1, 10*time.Millisecond)
 	tracker.Track("order-2", 2, 2, 1*time.Hour)
-	tracker.Track("order-3", 3, 3, 50*time.Millisecond)
+	tracker.Track("order-3", 3, 3, 10*time.Millisecond)
 
 	if tracker.Count() != 3 {
 		t.Errorf("Expected 3 entries, got %d", tracker.Count())
 	}
 
 	// Wait for short windows to expire
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	// Clean expired
 	removed := tracker.CleanExpired()
@@ -148,8 +148,8 @@ func TestDedupTracker_MaxSizeWithExpired(t *testing.T) {
 	tracker := NewDedupTracker("", 3)
 
 	// Add entries that will expire
-	tracker.Track("temp-1", 1, 1, 50*time.Millisecond)
-	tracker.Track("temp-2", 2, 2, 50*time.Millisecond)
+	tracker.Track("temp-1", 1, 1, 10*time.Millisecond)
+	tracker.Track("temp-2", 2, 2, 10*time.Millisecond)
 
 	// Add entry that won't expire
 	tracker.Track("perm-1", 3, 3, 1*time.Hour)
@@ -161,7 +161,7 @@ func TestDedupTracker_MaxSizeWithExpired(t *testing.T) {
 	}
 
 	// Wait for short-lived entries to expire
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	// Now we can add new entries (expired ones don't count toward limit)
 	err = tracker.Track("new", 4, 4, 1*time.Hour)
@@ -174,9 +174,9 @@ func TestDedupTracker_ActiveCount(t *testing.T) {
 	tracker := NewDedupTracker("", 1000)
 
 	// Track some entries with different windows
-	tracker.Track("short-1", 1, 1, 50*time.Millisecond)
+	tracker.Track("short-1", 1, 1, 10*time.Millisecond)
 	tracker.Track("long-1", 2, 2, 1*time.Hour)
-	tracker.Track("short-2", 3, 3, 50*time.Millisecond)
+	tracker.Track("short-2", 3, 3, 10*time.Millisecond)
 
 	// All should be active initially
 	if tracker.ActiveCount() != 3 {
@@ -184,7 +184,7 @@ func TestDedupTracker_ActiveCount(t *testing.T) {
 	}
 
 	// Wait for short windows to expire
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	// Active count should decrease (but total count stays same until cleanup)
 	if tracker.ActiveCount() != 1 {
@@ -250,11 +250,11 @@ func TestDedupTracker_PersistenceSkipsExpired(t *testing.T) {
 	tracker1 := NewDedupTracker(statePath, 1000)
 
 	// Add entries with different windows
-	tracker1.Track("short", 1, 1, 50*time.Millisecond)
+	tracker1.Track("short", 1, 1, 10*time.Millisecond)
 	tracker1.Track("long", 2, 2, 1*time.Hour)
 
 	// Wait for short entry to expire
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	// Persist and load
 	tracker1.Persist()
