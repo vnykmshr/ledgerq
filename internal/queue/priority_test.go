@@ -353,7 +353,7 @@ func TestQueue_BatchWithOptions_TTL(t *testing.T) {
 
 	// Enqueue batch with TTL
 	messages := []BatchEnqueueOptions{
-		{Payload: []byte("expires"), Priority: format.PriorityHigh, TTL: 50 * time.Millisecond},
+		{Payload: []byte("expires"), Priority: format.PriorityHigh, TTL: 2 * time.Millisecond},
 		{Payload: []byte("persistent"), Priority: format.PriorityLow, TTL: 0},
 	}
 
@@ -363,7 +363,7 @@ func TestQueue_BatchWithOptions_TTL(t *testing.T) {
 	}
 
 	// Wait for first message to expire
-	time.Sleep(5 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	// Should get second message (first expired)
 	msg, err := q.Dequeue()
@@ -449,12 +449,12 @@ func TestQueue_BatchWithOptions_AllFeatures(t *testing.T) {
 		{
 			Payload:  []byte("high-with-ttl"),
 			Priority: format.PriorityHigh,
-			TTL:      5 * time.Millisecond,
+			TTL:      time.Hour, // Long TTL so it doesn't expire during test
 		},
 		{
 			Payload:  []byte("medium-all"),
 			Priority: format.PriorityMedium,
-			TTL:      5 * time.Second,
+			TTL:      time.Hour,
 			Headers:  map[string]string{"key": "value2"},
 		},
 	}
