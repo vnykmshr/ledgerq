@@ -21,9 +21,9 @@ func main() {
 
 	// Open queue with compression enabled by default
 	opts := &ledgerq.Options{
-		DefaultCompression: ledgerq.CompressionGzip,  // Enable gzip compression
-		CompressionLevel:   6,                         // Balanced compression (default)
-		MinCompressionSize: 512,                       // Only compress messages >= 512 bytes
+		DefaultCompression: ledgerq.CompressionGzip, // Enable gzip compression
+		CompressionLevel:   6,                       // Balanced compression (default)
+		MinCompressionSize: 512,                     // Only compress messages >= 512 bytes
 	}
 
 	q, err := ledgerq.Open(queueDir, opts)

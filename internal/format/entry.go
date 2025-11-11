@@ -312,7 +312,7 @@ func Unmarshal(r io.Reader) (*Entry, error) {
 		MsgID:       binary.LittleEndian.Uint64(buf[6:14]),
 		Timestamp:   int64(binary.LittleEndian.Uint64(buf[14:22])), //nolint:gosec // G115: Safe int64 conversion
 		Priority:    PriorityLow,                                   // Default for backward compatibility
-		Compression: CompressionNone,                              // Default for backward compatibility
+		Compression: CompressionNone,                               // Default for backward compatibility
 	}
 
 	// Parse Priority if flag is set

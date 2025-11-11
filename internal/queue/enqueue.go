@@ -10,7 +10,6 @@ import (
 	"github.com/vnykmshr/ledgerq/internal/logging"
 )
 
-
 // Enqueue appends a message to the queue.
 // Returns the offset where the message was written.
 func (q *Queue) Enqueue(payload []byte) (uint64, error) {

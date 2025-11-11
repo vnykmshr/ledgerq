@@ -293,23 +293,23 @@ func TestCompression_Roundtrip(t *testing.T) {
 
 func TestCompression_CompressionRatios(t *testing.T) {
 	testCases := []struct {
-		name            string
-		payload         []byte
+		name                string
+		payload             []byte
 		minCompressionRatio float64 // Minimum expected compression (compressed/original)
 	}{
 		{
-			name:            "highly repetitive",
-			payload:         bytes.Repeat([]byte("A"), 10000),
+			name:                "highly repetitive",
+			payload:             bytes.Repeat([]byte("A"), 10000),
 			minCompressionRatio: 0.01, // Should compress to ~1% or less
 		},
 		{
-			name:            "json data",
-			payload:         []byte(strings.Repeat(`{"key":"value","number":12345}`, 100)),
+			name:                "json data",
+			payload:             []byte(strings.Repeat(`{"key":"value","number":12345}`, 100)),
 			minCompressionRatio: 0.3, // Should compress to ~30% or less
 		},
 		{
-			name:            "text data",
-			payload:         []byte(strings.Repeat("The quick brown fox jumps over the lazy dog. ", 100)),
+			name:                "text data",
+			payload:             []byte(strings.Repeat("The quick brown fox jumps over the lazy dog. ", 100)),
 			minCompressionRatio: 0.5, // Should compress to ~50% or less
 		},
 	}

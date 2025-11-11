@@ -124,18 +124,18 @@ type MetricsCollector interface {
 // DefaultOptions returns sensible defaults for queue configuration.
 func DefaultOptions(dir string) *Options {
 	return &Options{
-		SegmentOptions:           segment.DefaultManagerOptions(dir),
-		AutoSync:                 false,
-		SyncInterval:             1 * time.Second,
-		CompactionInterval:       0,                       // Disabled by default
-		EnablePriorities:         false,                   // FIFO mode by default
-		PriorityStarvationWindow: 30 * time.Second,        // 30 seconds
-		DLQPath:                  "",                      // DLQ disabled by default
-		MaxRetries:               3,                       // 3 retries before moving to DLQ
-		MaxMessageSize:           10 * 1024 * 1024,        // 10 MB max message size
-		MinFreeDiskSpace:         100 * 1024 * 1024,       // 100 MB minimum free space
-		DLQMaxAge:                0,                       // No age-based cleanup by default
-		DLQMaxSize:               0,                       // No size limit by default
+		SegmentOptions:             segment.DefaultManagerOptions(dir),
+		AutoSync:                   false,
+		SyncInterval:               1 * time.Second,
+		CompactionInterval:         0,                       // Disabled by default
+		EnablePriorities:           false,                   // FIFO mode by default
+		PriorityStarvationWindow:   30 * time.Second,        // 30 seconds
+		DLQPath:                    "",                      // DLQ disabled by default
+		MaxRetries:                 3,                       // 3 retries before moving to DLQ
+		MaxMessageSize:             10 * 1024 * 1024,        // 10 MB max message size
+		MinFreeDiskSpace:           100 * 1024 * 1024,       // 100 MB minimum free space
+		DLQMaxAge:                  0,                       // No age-based cleanup by default
+		DLQMaxSize:                 0,                       // No size limit by default
 		DefaultCompression:         format.CompressionNone,  // No compression by default
 		CompressionLevel:           0,                       // Use algorithm default (gzip.DefaultCompression = 6)
 		MinCompressionSize:         1024,                    // 1KB minimum for compression

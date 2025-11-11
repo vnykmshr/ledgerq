@@ -173,8 +173,8 @@ func Open(dir string, opts *Options) (*Queue, error) {
 		// Create DLQ queue with modified options to prevent infinite recursion
 		// The DLQ itself cannot have a DLQ, and messages in DLQ don't need retry tracking
 		dlqOpts := *opts
-		dlqOpts.DLQPath = ""                                    // Disable DLQ for the DLQ itself
-		dlqOpts.MaxRetries = 0                                  // No retries for DLQ messages
+		dlqOpts.DLQPath = ""                                                 // Disable DLQ for the DLQ itself
+		dlqOpts.MaxRetries = 0                                               // No retries for DLQ messages
 		dlqOpts.SegmentOptions = segment.DefaultManagerOptions(opts.DLQPath) // Use DLQ path for segment manager
 
 		// Open DLQ queue (Open will create directory if it doesn't exist)
@@ -293,12 +293,9 @@ func recoverState(segments *segment.Manager) (nextMsgID, readMsgID uint64, err e
 	return nextMsgID, readMsgID, nil
 }
 
-
-
 // SeekToMessageID sets the read position to a specific message ID.
 // Subsequent Dequeue() calls will start reading from this message.
 // Returns an error if the message ID is invalid or out of range.
-
 
 // Close closes the queue and releases all resources.
 func (q *Queue) Close() error {
@@ -391,5 +388,3 @@ func (q *Queue) IsClosed() bool {
 	defer q.mu.RUnlock()
 	return q.closed
 }
-
-

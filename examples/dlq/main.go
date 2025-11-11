@@ -36,8 +36,8 @@ func main() {
 
 	// Configure queue with DLQ enabled
 	opts := ledgerq.DefaultOptions(queueDir)
-	opts.DLQPath = dlqDir    // Enable DLQ
-	opts.MaxRetries = 3      // Max 3 retry attempts before moving to DLQ
+	opts.DLQPath = dlqDir // Enable DLQ
+	opts.MaxRetries = 3   // Max 3 retry attempts before moving to DLQ
 
 	// Open the queue with DLQ configuration
 	q, err := ledgerq.Open(queueDir, opts)
@@ -56,7 +56,7 @@ func main() {
 	fmt.Println("   ------------------")
 
 	messages := []struct {
-		payload string
+		payload    string
 		shouldFail bool
 	}{
 		{"Task: Process payment #1001", false},  // Will succeed

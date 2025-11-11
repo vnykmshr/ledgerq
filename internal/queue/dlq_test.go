@@ -23,16 +23,16 @@ func TestQueue_DLQInitialization(t *testing.T) {
 		t.Fatalf("failed to open queue: %v", err)
 	}
 	defer q.Close()
-	
+
 	// Verify DLQ was initialized
 	if q.dlq == nil {
 		t.Error("DLQ should be initialized when DLQPath is configured")
 	}
-	
+
 	if q.retryTracker == nil {
 		t.Error("RetryTracker should be initialized when DLQPath is configured")
 	}
-	
+
 	// Verify DLQ directory was created
 	if _, err := os.Stat(dlqDir); os.IsNotExist(err) {
 		t.Error("DLQ directory should be created")
@@ -45,21 +45,21 @@ func TestQueue_DLQInitialization(t *testing.T) {
 // Test that DLQ is NOT initialized when DLQPath is empty
 func TestQueue_DLQNotInitializedByDefault(t *testing.T) {
 	dir := t.TempDir()
-	
+
 	opts := DefaultOptions(dir)
 	// DLQPath is empty by default
-	
+
 	q, err := Open(dir, opts)
 	if err != nil {
 		t.Fatalf("failed to open queue: %v", err)
 	}
 	defer q.Close()
-	
+
 	// Verify DLQ was NOT initialized
 	if q.dlq != nil {
 		t.Error("DLQ should not be initialized when DLQPath is empty")
 	}
-	
+
 	if q.retryTracker != nil {
 		t.Error("RetryTracker should not be initialized when DLQPath is empty")
 	}
@@ -80,26 +80,26 @@ func TestQueue_DLQNoRecursion(t *testing.T) {
 		t.Fatalf("failed to open queue: %v", err)
 	}
 	defer q.Close()
-	
+
 	// Verify main queue has DLQ
 	if q.dlq == nil {
 		t.Fatal("Main queue should have DLQ")
 	}
-	
+
 	// Verify DLQ doesn't have its own DLQ (no recursion)
 	if q.dlq.dlq != nil {
 		t.Error("DLQ queue should not have its own DLQ (infinite recursion prevention)")
 	}
-	
+
 	if q.dlq.retryTracker != nil {
 		t.Error("DLQ queue should not have retry tracker (infinite recursion prevention)")
 	}
-	
+
 	// Verify DLQ options
 	if q.dlq.opts.DLQPath != "" {
 		t.Errorf("DLQ queue should have empty DLQPath, got: %s", q.dlq.opts.DLQPath)
 	}
-	
+
 	if q.dlq.opts.MaxRetries != 0 {
 		t.Errorf("DLQ queue should have MaxRetries=0, got: %d", q.dlq.opts.MaxRetries)
 	}

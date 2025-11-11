@@ -108,4 +108,3 @@ func TestPersistence(t *testing.T) {
 	dequeued := dequeueN(t, q2, 3)
 	assertPayloads(t, dequeued, messages)
 }
-

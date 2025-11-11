@@ -354,17 +354,17 @@ func DefaultOptions(dir string) *Options {
 		MaxSegmentSize:           1024 * 1024 * 1024, // 1GB
 		MaxSegmentMessages:       0,                  // Unlimited
 		RotationPolicy:           RotateBySize,
-		RetentionPolicy:          nil,                  // No retention
-		EnablePriorities:         false,                // FIFO mode by default
-		PriorityStarvationWindow: 30 * time.Second,     // 30 seconds
-		DLQPath:                  "",                   // DLQ disabled by default
-		MaxRetries:               3,                    // 3 retries before moving to DLQ
-		MaxMessageSize:           10 * 1024 * 1024,     // 10 MB max message size
-		MinFreeDiskSpace:         100 * 1024 * 1024,    // 100 MB minimum free space
-		DLQMaxAge:                0,                    // No age-based cleanup by default
-		DLQMaxSize:               0,                    // No size limit by default
-		Logger:                   nil,                  // No logging
-		MetricsCollector:         nil,                  // No metrics
+		RetentionPolicy:          nil,               // No retention
+		EnablePriorities:         false,             // FIFO mode by default
+		PriorityStarvationWindow: 30 * time.Second,  // 30 seconds
+		DLQPath:                  "",                // DLQ disabled by default
+		MaxRetries:               3,                 // 3 retries before moving to DLQ
+		MaxMessageSize:           10 * 1024 * 1024,  // 10 MB max message size
+		MinFreeDiskSpace:         100 * 1024 * 1024, // 100 MB minimum free space
+		DLQMaxAge:                0,                 // No age-based cleanup by default
+		DLQMaxSize:               0,                 // No size limit by default
+		Logger:                   nil,               // No logging
+		MetricsCollector:         nil,               // No metrics
 	}
 }
 
