@@ -1,5 +1,6 @@
 # LedgerQ
 
+[![CI](https://github.com/vnykmshr/ledgerq/actions/workflows/ci.yml/badge.svg)](https://github.com/vnykmshr/ledgerq/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/vnykmshr/ledgerq.svg)](https://pkg.go.dev/github.com/vnykmshr/ledgerq/pkg/ledgerq)
 [![Feature Complete](https://img.shields.io/badge/status-feature--complete-success.svg)](https://github.com/vnykmshr/ledgerq/releases/tag/v1.4.0)
