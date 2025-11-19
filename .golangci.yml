@@ -1,45 +1,55 @@
+version: "2"
 run:
-  timeout: 5m
   tests: true
-
 linters:
   enable:
-    - govet
-    - errcheck
-    - staticcheck
-    - unused
-    - ineffassign
+    - bodyclose
+    - gocyclo
+    - gosec
     - revive
     - unconvert
     - unparam
-    - gosec
-    - gocyclo
-    - bodyclose
-
-linters-settings:
-  gocyclo:
-    min-complexity: 20
-  revive:
+  settings:
+    gocyclo:
+      min-complexity: 20
+    gosec:
+      excludes:
+        - G115
+    misspell:
+      locale: US
+    revive:
+      rules:
+        - name: package-comments
+          severity: warning
+          disabled: false
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      - name: package-comments
-        severity: warning
-        disabled: false
-  misspell:
-    locale: US
-  gosec:
-    excludes:
-      - G115 # Integer overflow conversion (overly strict for our use case)
-
+      - linters:
+          - errcheck
+          - gocyclo
+          - gosec
+          - revive
+          - staticcheck
+          - unconvert
+          - unparam
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples/
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gocyclo
-        - errcheck
-        - gosec
-        - unparam
-        - gosimple
-        - unconvert
-        - revive
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples/
