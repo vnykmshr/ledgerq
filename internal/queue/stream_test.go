@@ -164,22 +164,23 @@ func TestStream_ConcurrentProducer(t *testing.T) {
 	}
 	defer func() { _ = q.Close() }()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
 	var receivedCount atomic.Int32
 	totalToSend := 20
 
+	// Use channel to signal when all messages received
+	done := make(chan struct{})
+
 	handler := func(msg *Message) error {
-		receivedCount.Add(1)
-		// Cancel after receiving all messages
-		if receivedCount.Load() >= int32(totalToSend) {
-			cancel()
+		if receivedCount.Add(1) >= int32(totalToSend) {
+			close(done)
 		}
 		return nil
 	}
 
 	// Start streaming in background
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	var streamErr error
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -189,7 +190,7 @@ func TestStream_ConcurrentProducer(t *testing.T) {
 	}()
 
 	// Give stream a moment to start
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	// Produce messages while streaming
 	for i := 0; i < totalToSend; i++ {
@@ -197,20 +198,24 @@ func TestStream_ConcurrentProducer(t *testing.T) {
 			t.Fatalf("Enqueue() error = %v", err)
 		}
 		// Small delay between messages
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Wait for all messages to be received or timeout
+	select {
+	case <-done:
+		cancel() // Success - cancel the stream
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatalf("Timeout waiting for messages: received %d, want %d", receivedCount.Load(), totalToSend)
 	}
 
 	// Wait for stream to finish
 	wg.Wait()
 
-	// Should complete successfully (context canceled after all messages)
+	// Should complete with context.Canceled
 	if streamErr != nil && !errors.Is(streamErr, context.Canceled) {
-		t.Errorf("Stream() error = %v", streamErr)
-	}
-
-	// Should have received all messages
-	if receivedCount.Load() != int32(totalToSend) {
-		t.Errorf("Received %d messages, want %d", receivedCount.Load(), totalToSend)
+		t.Errorf("Stream() error = %v, want context.Canceled", streamErr)
 	}
 }
 
